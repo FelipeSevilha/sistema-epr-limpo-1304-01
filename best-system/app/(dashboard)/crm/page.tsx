@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Users,
   Search,
-  Funnel,
+  Filter,
   BadgeDollarSign,
   TrendingUp,
   Phone,
@@ -318,7 +318,7 @@ export default function CRMPage() {
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Funil aberto
             </p>
-            <Funnel className="h-4 w-4 text-violet-500" />
+            <Filter className="h-4 w-4 text-violet-500" />
           </div>
           <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.funilAberto}</p>
         </div>
