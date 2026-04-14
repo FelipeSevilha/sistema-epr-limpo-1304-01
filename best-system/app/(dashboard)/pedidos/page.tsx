@@ -16,6 +16,10 @@ import {
   Save,
   TrendingUp,
   CircleDollarSign,
+  Printer,
+  Scissors,
+  Package,
+  Cog,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
@@ -40,7 +44,36 @@ type OrdemProducaoRow = {
   id: string;
   pedido_id?: string | null;
   pedido_numero?: string | null;
+  produto?: string | null;
+  quantidade?: number | null;
   custo_previsto?: number | null;
+};
+
+type FichaTecnicaItem = {
+  id: string;
+  produto_nome: string;
+  material_nome: string;
+  quantidade: number;
+  unidade: string;
+};
+
+type EstoqueItem = {
+  id: string;
+  item: string;
+  categoria: string;
+  quantidade: number;
+  unidade: string;
+  estoque_minimo: number;
+  fornecedor: string;
+  valor_unitario: number;
+};
+
+type CostBreakdown = {
+  material: number;
+  impressao: number;
+  acabamento: number;
+  operacional: number;
+  total: number;
 };
 
 type PedidoFormData = {
@@ -102,9 +135,111 @@ function nextPedidoNumero(pedidos: PedidoRow[]) {
   return `P-${String(max + 1).padStart(4, '0')}`;
 }
 
+function normalizeText(value: string) {
+  return (value || '').toLowerCase().trim();
+}
+
+function inferGroup(materialName: string, categoria: string) {
+  const text = `${materialName} ${categoria}`.toLowerCase();
+
+  if (
+    text.includes('impress') ||
+    text.includes('pb') ||
+    text.includes('p&b') ||
+    text.includes('colorid') ||
+    text.includes('cmyk') ||
+    text.includes('toner')
+  ) {
+    return 'impressao';
+  }
+
+  if (
+    text.includes('wire') ||
+    text.includes('bopp') ||
+    text.includes('lamina') ||
+    text.includes('laminação') ||
+    text.includes('laminacao') ||
+    text.includes('verniz') ||
+    text.includes('faca') ||
+    text.includes('corte') ||
+    text.includes('vinco') ||
+    text.includes('dobr') ||
+    text.includes('espiral') ||
+    text.includes('acabamento')
+  ) {
+    return 'acabamento';
+  }
+
+  return 'material';
+}
+
+function calculateOperationalCost(
+  quantidade: number,
+  material: number,
+  impressao: number,
+  acabamento: number
+) {
+  const baseMovimentacao = quantidade * 0.12;
+  const baseSetup = 18;
+  const percentual = (material + impressao + acabamento) * 0.08;
+  return Number((baseMovimentacao + baseSetup + percentual).toFixed(2));
+}
+
+function buildCostBreakdown(
+  produtoNome: string,
+  quantidadeProducao: number,
+  ficha: FichaTecnicaItem[],
+  estoque: EstoqueItem[]
+): CostBreakdown {
+  const materiais = ficha.filter((f) => normalizeText(f.produto_nome) === normalizeText(produtoNome));
+
+  let material = 0;
+  let impressao = 0;
+  let acabamento = 0;
+
+  for (const item of materiais) {
+    const itemEstoque = estoque.find(
+      (e) => normalizeText(e.item) === normalizeText(item.material_nome)
+    );
+
+    if (!itemEstoque) continue;
+
+    const consumoTotal = Number(item.quantidade || 0) * Number(quantidadeProducao || 0);
+    const custoItem = consumoTotal * Number(itemEstoque.valor_unitario || 0);
+    const group = inferGroup(item.material_nome, itemEstoque.categoria || '');
+
+    if (group === 'impressao') {
+      impressao += custoItem;
+    } else if (group === 'acabamento') {
+      acabamento += custoItem;
+    } else {
+      material += custoItem;
+    }
+  }
+
+  const operacional = calculateOperationalCost(
+    quantidadeProducao,
+    material,
+    impressao,
+    acabamento
+  );
+
+  const total = material + impressao + acabamento + operacional;
+
+  return {
+    material: Number(material.toFixed(2)),
+    impressao: Number(impressao.toFixed(2)),
+    acabamento: Number(acabamento.toFixed(2)),
+    operacional: Number(operacional.toFixed(2)),
+    total: Number(total.toFixed(2)),
+  };
+}
+
 export default function PedidosPage() {
   const [pedidos, setPedidos] = useState<PedidoRow[]>([]);
   const [ordens, setOrdens] = useState<OrdemProducaoRow[]>([]);
+  const [ficha, setFicha] = useState<FichaTecnicaItem[]>([]);
+  const [estoque, setEstoque] = useState<EstoqueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedPedido, setSelectedPedido] = useState<PedidoRow | null>(null);
@@ -121,16 +256,22 @@ export default function PedidosPage() {
       setLoading(true);
       setError('');
 
-      const [pedidosRes, ordensRes] = await Promise.all([
+      const [pedidosRes, ordensRes, fichaRes, estoqueRes] = await Promise.all([
         supabase.from('pedidos').select('*').order('created_at', { ascending: false }),
-        supabase.from('ordens_producao').select('id,pedido_id,pedido_numero,custo_previsto').order('created_at', { ascending: false }),
+        supabase.from('ordens_producao').select('id,pedido_id,pedido_numero,produto,quantidade,custo_previsto').order('created_at', { ascending: false }),
+        supabase.from('ficha_tecnica').select('*'),
+        supabase.from('estoque').select('*'),
       ]);
 
       if (pedidosRes.error) throw pedidosRes.error;
       if (ordensRes.error) throw ordensRes.error;
+      if (fichaRes.error) throw fichaRes.error;
+      if (estoqueRes.error) throw estoqueRes.error;
 
       setPedidos((pedidosRes.data as PedidoRow[]) || []);
       setOrdens((ordensRes.data as OrdemProducaoRow[]) || []);
+      setFicha((fichaRes.data as FichaTecnicaItem[]) || []);
+      setEstoque((estoqueRes.data as EstoqueItem[]) || []);
     } catch (err: any) {
       console.error('Erro ao carregar pedidos:', err);
       setError(err?.message || 'Erro ao carregar pedidos');
@@ -152,6 +293,25 @@ export default function PedidosPage() {
     });
     return map;
   }, [ordens]);
+
+  const breakdownMap = useMemo(() => {
+    const map = new Map<string, CostBreakdown>();
+
+    ordens.forEach((ordem) => {
+      if (!ordem.pedido_id) return;
+
+      const breakdown = buildCostBreakdown(
+        ordem.produto || '',
+        Number(ordem.quantidade || 0),
+        ficha,
+        estoque
+      );
+
+      map.set(ordem.pedido_id, breakdown);
+    });
+
+    return map;
+  }, [ordens, ficha, estoque]);
 
   const pedidosComOp = useMemo(() => {
     return new Set(ordens.map((op) => op.pedido_id).filter(Boolean));
@@ -470,7 +630,7 @@ export default function PedidosPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1450px] text-sm">
+            <table className="w-full min-w-[1650px] text-sm">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-900/60">
                   {[
@@ -478,9 +638,13 @@ export default function PedidosPage() {
                     'Cliente',
                     'Produto',
                     'Qtd',
-                    'Valor Venda',
-                    'Custo Previsto',
-                    'Lucro Bruto',
+                    'Venda',
+                    'Matéria-prima',
+                    'Impressão',
+                    'Acabamento',
+                    'Operacional',
+                    'Custo Total',
+                    'Lucro',
                     'Margem',
                     'Status',
                     'Produção',
@@ -505,10 +669,16 @@ export default function PedidosPage() {
                     'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
 
                   const jaTemOp = pedidosComOp.has(pedido.id);
-                  const ordem = pedido.id ? ordensMap.get(pedido.id) : undefined;
-                  const custoPrevisto = Number(ordem?.custo_previsto || 0);
+                  const breakdown = pedido.id ? breakdownMap.get(pedido.id) : undefined;
+
+                  const material = Number(breakdown?.material || 0);
+                  const impressao = Number(breakdown?.impressao || 0);
+                  const acabamento = Number(breakdown?.acabamento || 0);
+                  const operacional = Number(breakdown?.operacional || 0);
+                  const custoTotal = Number(breakdown?.total || 0);
+
                   const valorVenda = Number(pedido.valor || 0);
-                  const lucroBruto = valorVenda - custoPrevisto;
+                  const lucroBruto = valorVenda - custoTotal;
                   const margem = valorVenda > 0 ? (lucroBruto / valorVenda) * 100 : 0;
 
                   return (
@@ -536,14 +706,24 @@ export default function PedidosPage() {
                         {formatCurrency(valorVenda)}
                       </td>
 
-                      <td className="px-4 py-3">
-                        {jaTemOp ? (
-                          <span className="font-semibold text-slate-900 dark:text-white">
-                            {formatCurrency(custoPrevisto)}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400 dark:text-slate-500">—</span>
-                        )}
+                      <td className="px-4 py-3 text-slate-900 dark:text-white">
+                        {jaTemOp ? formatCurrency(material) : '—'}
+                      </td>
+
+                      <td className="px-4 py-3 text-slate-900 dark:text-white">
+                        {jaTemOp ? formatCurrency(impressao) : '—'}
+                      </td>
+
+                      <td className="px-4 py-3 text-slate-900 dark:text-white">
+                        {jaTemOp ? formatCurrency(acabamento) : '—'}
+                      </td>
+
+                      <td className="px-4 py-3 text-slate-900 dark:text-white">
+                        {jaTemOp ? formatCurrency(operacional) : '—'}
+                      </td>
+
+                      <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
+                        {jaTemOp ? formatCurrency(custoTotal) : '—'}
                       </td>
 
                       <td className="px-4 py-3">
@@ -552,7 +732,7 @@ export default function PedidosPage() {
                             {formatCurrency(lucroBruto)}
                           </span>
                         ) : (
-                          <span className="text-slate-400 dark:text-slate-500">—</span>
+                          '—'
                         )}
                       </td>
 
@@ -568,7 +748,7 @@ export default function PedidosPage() {
                             {margem.toFixed(1)}%
                           </span>
                         ) : (
-                          <span className="text-slate-400 dark:text-slate-500">—</span>
+                          '—'
                         )}
                       </td>
 
@@ -666,7 +846,7 @@ export default function PedidosPage() {
                 {filtered.length === 0 && (
                   <tr>
                     <td
-                      colSpan={12}
+                      colSpan={16}
                       className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400"
                     >
                       Nenhum pedido encontrado.
@@ -685,7 +865,7 @@ export default function PedidosPage() {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => setSelectedPedido(null)}
           />
-          <div className="relative z-10 w-full max-w-3xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+          <div className="relative z-10 w-full max-w-4xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
@@ -709,10 +889,16 @@ export default function PedidosPage() {
             </div>
 
             {(() => {
-              const ordem = selectedPedido.id ? ordensMap.get(selectedPedido.id) : undefined;
-              const custoPrevisto = Number(ordem?.custo_previsto || 0);
+              const breakdown = selectedPedido.id ? breakdownMap.get(selectedPedido.id) : undefined;
+
+              const material = Number(breakdown?.material || 0);
+              const impressao = Number(breakdown?.impressao || 0);
+              const acabamento = Number(breakdown?.acabamento || 0);
+              const operacional = Number(breakdown?.operacional || 0);
+              const custoTotal = Number(breakdown?.total || 0);
+
               const valorVenda = Number(selectedPedido.valor || 0);
-              const lucroBruto = valorVenda - custoPrevisto;
+              const lucroBruto = valorVenda - custoTotal;
               const margem = valorVenda > 0 ? (lucroBruto / valorVenda) * 100 : 0;
 
               return (
@@ -729,10 +915,10 @@ export default function PedidosPage() {
 
                     <div className="erp-card p-4">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                        Custo previsto
+                        Custo total
                       </p>
                       <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
-                        {formatCurrency(custoPrevisto)}
+                        {formatCurrency(custoTotal)}
                       </p>
                     </div>
 
@@ -751,6 +937,56 @@ export default function PedidosPage() {
                       </p>
                       <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
                         {margem.toFixed(1)}%
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="erp-card p-4">
+                      <div className="flex items-center gap-2">
+                        <Package className="h-4 w-4 text-sky-500" />
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          Matéria-prima
+                        </p>
+                      </div>
+                      <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
+                        {formatCurrency(material)}
+                      </p>
+                    </div>
+
+                    <div className="erp-card p-4">
+                      <div className="flex items-center gap-2">
+                        <Printer className="h-4 w-4 text-violet-500" />
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          Impressão
+                        </p>
+                      </div>
+                      <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
+                        {formatCurrency(impressao)}
+                      </p>
+                    </div>
+
+                    <div className="erp-card p-4">
+                      <div className="flex items-center gap-2">
+                        <Scissors className="h-4 w-4 text-amber-500" />
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          Acabamento
+                        </p>
+                      </div>
+                      <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
+                        {formatCurrency(acabamento)}
+                      </p>
+                    </div>
+
+                    <div className="erp-card p-4">
+                      <div className="flex items-center gap-2">
+                        <Cog className="h-4 w-4 text-emerald-500" />
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          Operacional
+                        </p>
+                      </div>
+                      <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
+                        {formatCurrency(operacional)}
                       </p>
                     </div>
                   </div>
@@ -778,7 +1014,9 @@ export default function PedidosPage() {
                           : 'Não informado'}
                       </p>
                       <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                        {ordem ? 'Ordem de produção gerada' : 'Produção ainda não gerada'}
+                        {selectedPedido.id && ordensMap.get(selectedPedido.id)
+                          ? 'Ordem de produção gerada'
+                          : 'Produção ainda não gerada'}
                       </p>
                     </div>
                   </div>
@@ -791,7 +1029,7 @@ export default function PedidosPage() {
                       </p>
                     </div>
                     <p className="text-sm text-slate-700 dark:text-slate-200">
-                      Esse pedido já exibe custo previsto, lucro bruto e margem estimada com base na produção vinculada.
+                      Agora o pedido mostra custo separado por matéria-prima, impressão, acabamento e operacional, deixando a análise mais próxima da realidade.
                     </p>
                   </div>
 
