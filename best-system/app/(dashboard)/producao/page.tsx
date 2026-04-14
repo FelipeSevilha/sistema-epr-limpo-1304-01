@@ -116,8 +116,10 @@ function formatarDuracaoHoras(horas: number) {
 
 function diffHours(start?: string | null, end?: string | null) {
   if (!start || !end) return 0;
+
   const inicio = new Date(start).getTime();
   const fim = new Date(end).getTime();
+
   if (!Number.isFinite(inicio) || !Number.isFinite(fim) || fim < inicio) return 0;
   return (fim - inicio) / (1000 * 60 * 60);
 }
@@ -143,8 +145,8 @@ export default function ProducaoPage() {
       if (ordensRes.error) throw ordensRes.error;
       if (historicoRes.error) throw historicoRes.error;
 
-      setOrdens((ordensRes.data as OrdemItem[]) || []);
-      setHistorico((historicoRes.data as HistoricoItem[]) || []);
+      setOrdens(Array.isArray(ordensRes.data) ? (ordensRes.data as OrdemItem[]) : []);
+      setHistorico(Array.isArray(historicoRes.data) ? (historicoRes.data as HistoricoItem[]) : []);
     } catch (err: any) {
       console.error(err);
       setError(err?.message || 'Erro ao carregar produção');
@@ -154,20 +156,24 @@ export default function ProducaoPage() {
   }
 
   async function registrarHistorico(ordem: OrdemItem, deEtapa: string | null, paraEtapa: string) {
-    const payload = {
-      ordem_id: ordem.id,
-      pedido_id: ordem.pedido_id || null,
-      pedido_numero: ordem.pedido_numero || null,
-      cliente_nome: ordem.cliente_nome || null,
-      produto_nome: getProdutoNome(ordem),
-      de_etapa: deEtapa,
-      para_etapa: paraEtapa,
-      prioridade: getPrioridade(ordem),
-      movido_em: new Date().toISOString(),
-    };
+    try {
+      const payload = {
+        ordem_id: ordem.id,
+        pedido_id: ordem.pedido_id || null,
+        pedido_numero: ordem.pedido_numero || null,
+        cliente_nome: ordem.cliente_nome || null,
+        produto_nome: getProdutoNome(ordem),
+        de_etapa: deEtapa,
+        para_etapa: paraEtapa,
+        prioridade: getPrioridade(ordem),
+        movido_em: new Date().toISOString(),
+      };
 
-    const { error } = await supabase.from('historico_producao').insert(payload);
-    if (error) throw error;
+      const { error } = await supabase.from('historico_producao').insert(payload);
+      if (error) throw error;
+    } catch (err) {
+      console.error('Erro ao registrar histórico:', err);
+    }
   }
 
   async function mover(id: string, novaEtapa: string) {
@@ -181,9 +187,8 @@ export default function ProducaoPage() {
       const updates: Record<string, any> = {
         etapa: novaEtapa,
         updated_at: new Date().toISOString(),
+        status: novaEtapa === 'Finalizado' ? 'Finalizado' : 'Em produção',
       };
-
-      updates.status = novaEtapa === 'Finalizado' ? 'Finalizado' : 'Em produção';
 
       const { error } = await supabase
         .from('ordens_producao')
@@ -226,18 +231,7 @@ export default function ProducaoPage() {
 
       if (error) throw error;
 
-      await supabase.from('historico_producao').insert({
-        ordem_id: ordem.id,
-        pedido_id: ordem.pedido_id || null,
-        pedido_numero: ordem.pedido_numero || null,
-        cliente_nome: ordem.cliente_nome || null,
-        produto_nome: getProdutoNome(ordem),
-        de_etapa: ordem.etapa || 'Aguardando',
-        para_etapa: ordem.etapa || 'Aguardando',
-        prioridade,
-        movido_em: new Date().toISOString(),
-      });
-
+      await registrarHistorico(ordem, ordem.etapa || 'Aguardando', ordem.etapa || 'Aguardando');
       await carregar();
     } catch (err: any) {
       console.error(err);
@@ -277,21 +271,23 @@ export default function ProducaoPage() {
   }, [historico]);
 
   const performanceEtapas = useMemo(() => {
+    const porOrdem: Record<string, HistoricoItem[]> = {};
+
+    historico.forEach((item) => {
+      if (!item?.ordem_id) return;
+      if (!porOrdem[item.ordem_id]) {
+        porOrdem[item.ordem_id] = [];
+      }
+      porOrdem[item.ordem_id].push(item);
+    });
+
     return ETAPAS.map((etapa) => {
-      const itensEtapa = historico.filter((h) => h.para_etapa === etapa);
+      const itensEtapa = historico.filter((h) => h?.para_etapa === etapa);
 
       let somaHoras = 0;
       let totalTransicoesComTempo = 0;
 
-      const porOrdem = new Map<string, HistoricoItem[]>();
-
-      historico.forEach((item) => {
-        const arr = porOrdem.get(item.ordem_id) || [];
-        arr.push(item);
-        porOrdem.set(item.ordem_id, arr);
-      });
-
-      porOrdem.forEach((items) => {
+      Object.values(porOrdem).forEach((items) => {
         const ordenados = [...items].sort((a, b) => {
           return new Date(a.movido_em || 0).getTime() - new Date(b.movido_em || 0).getTime();
         });
