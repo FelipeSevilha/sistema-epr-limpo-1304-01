@@ -16,11 +16,13 @@ import { supabase } from '@/lib/supabase';
 
 type Orcamento = {
   id: string;
-  numero: string;
+  numero?: string | null;
   cliente_nome?: string | null;
+  cliente_id?: string | null;
   valor_total?: number | null;
-  status?: 'Aguardando' | 'Aprovado' | 'Recusado' | 'Convertido' | string | null;
+  status?: string | null;
   created_at?: string | null;
+  updated_at?: string | null;
 };
 
 type Pedido = {
@@ -121,25 +123,53 @@ function getLeadColor(status: LeadStatus) {
   }
 }
 
+function toLeadStatus(status?: string | null): LeadStatus {
+  const value = (status || '').toLowerCase();
+
+  if (value.includes('convert')) return 'Fechado';
+  if (value.includes('aprov')) return 'Fechado';
+  if (value.includes('recus')) return 'Contato';
+  if (value.includes('negoc')) return 'Negociação';
+  if (value.includes('propost')) return 'Proposta';
+  return 'Proposta';
+}
+
+function safeDate(value?: string | null) {
+  if (!value) return '2026-04-14';
+  const base = value.slice(0, 10);
+  return base || '2026-04-14';
+}
+
 export default function CRMPage() {
   const [orcamentos, setOrcamentos] = useState<Orcamento[]>([]);
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filtro, setFiltro] = useState<'Todos' | LeadStatus>('Todos');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     async function fetchData() {
-      setLoading(true);
+      try {
+        setLoading(true);
+        setError('');
 
-      const [orcRes, pedRes] = await Promise.all([
-        supabase.from('orcamentos').select('*').order('created_at', { ascending: false }),
-        supabase.from('pedidos').select('*').order('created_at', { ascending: false }),
-      ]);
+        const [orcRes, pedRes] = await Promise.all([
+          supabase.from('orcamentos').select('*').order('created_at', { ascending: false }),
+          supabase.from('pedidos').select('*').order('created_at', { ascending: false }),
+        ]);
 
-      setOrcamentos((orcRes.data as Orcamento[]) || []);
-      setPedidos((pedRes.data as Pedido[]) || []);
-      setLoading(false);
+        if (orcRes.error) throw orcRes.error;
+        if (pedRes.error) throw pedRes.error;
+
+        setOrcamentos((orcRes.data as Orcamento[]) || []);
+        setPedidos((pedRes.data as Pedido[]) || []);
+      } catch (err: any) {
+        console.error('Erro ao carregar CRM:', err);
+        setError(err?.message || 'Erro ao carregar CRM');
+      } finally {
+        setLoading(false);
+      }
     }
 
     fetchData();
@@ -148,10 +178,12 @@ export default function CRMPage() {
   const leads = useMemo(() => {
     const map = new Map<string, Lead>();
 
-    leadsBase.forEach((lead) => map.set(lead.cliente.toLowerCase(), lead));
+    leadsBase.forEach((lead) => {
+      map.set(lead.cliente.toLowerCase(), lead);
+    });
 
     orcamentos.forEach((orc) => {
-      const cliente = orc.cliente_nome || 'Cliente sem nome';
+      const cliente = (orc.cliente_nome || 'Cliente sem nome').trim();
       const key = cliente.toLowerCase();
 
       if (!map.has(key)) {
@@ -160,21 +192,50 @@ export default function CRMPage() {
           cliente,
           origem: 'Orçamento',
           responsavel: 'Equipe comercial',
-          status:
-            orc.status === 'Aprovado' || orc.status === 'Convertido'
-              ? 'Fechado'
-              : orc.status === 'Recusado'
-              ? 'Contato'
-              : 'Proposta',
+          status: toLeadStatus(orc.status),
           valorPotencial: Number(orc.valor_total || 0),
-          ultimoContato: (orc.created_at || '').slice(0, 10) || '2026-04-14',
-          observacoes: `Lead gerado a partir do orçamento ${orc.numero}.`,
+          ultimoContato: safeDate(orc.created_at),
+          observacoes: `Lead gerado a partir do orçamento ${orc.numero || 'sem número'}.`,
+        });
+      }
+    });
+
+    pedidos.forEach((pedido) => {
+      const cliente = (pedido.cliente_nome || '').trim();
+      if (!cliente) return;
+
+      const key = cliente.toLowerCase();
+      const existente = map.get(key);
+
+      if (!existente) {
+        map.set(key, {
+          id: `ped-${pedido.id}`,
+          cliente,
+          origem: 'Pedido direto',
+          responsavel: 'Equipe comercial',
+          status: 'Fechado',
+          valorPotencial: Number(pedido.valor || 0),
+          ultimoContato: safeDate(pedido.created_at),
+          observacoes: `Cliente já convertido em pedido ${pedido.numero || 'sem número'}.`,
+        });
+        return;
+      }
+
+      if ((pedido.status || '').toLowerCase() !== 'cancelado') {
+        map.set(key, {
+          ...existente,
+          status: 'Fechado',
+          valorPotencial: Math.max(Number(existente.valorPotencial || 0), Number(pedido.valor || 0)),
+          ultimoContato: safeDate(pedido.created_at),
+          observacoes:
+            existente.observacoes ||
+            `Cliente já convertido em pedido ${pedido.numero || 'sem número'}.`,
         });
       }
     });
 
     return Array.from(map.values());
-  }, [orcamentos]);
+  }, [orcamentos, pedidos]);
 
   const filtrados = useMemo(() => {
     return leads.filter((lead) => {
@@ -193,7 +254,7 @@ export default function CRMPage() {
     const funilAberto = leads.filter((l) => l.status !== 'Fechado').length;
     const valorPipeline = leads
       .filter((l) => l.status !== 'Fechado')
-      .reduce((sum, l) => sum + l.valorPotencial, 0);
+      .reduce((sum, l) => sum + Number(l.valorPotencial || 0), 0);
     const fechados = leads.filter((l) => l.status === 'Fechado').length;
 
     return {
@@ -227,6 +288,14 @@ export default function CRMPage() {
     return (
       <div className="flex h-64 items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+        {error}
       </div>
     );
   }
@@ -306,7 +375,9 @@ export default function CRMPage() {
 
             <button
               className="erp-button-primary"
-              onClick={() => alert('Na próxima etapa eu adiciono cadastro manual de lead e automações comerciais.')}
+              onClick={() =>
+                alert('Na próxima etapa eu adiciono cadastro manual de lead e automações comerciais.')
+              }
             >
               <Plus className="mr-2 h-4 w-4" />
               Novo Lead
@@ -389,25 +460,31 @@ export default function CRMPage() {
           <p className="erp-section-subtitle">Valor potencial por responsável</p>
 
           <div className="mt-5 space-y-3">
-            {vendedorRanking.map((item, index) => (
-              <div
-                key={`${item.nome}-${index}`}
-                className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/70"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-slate-900 dark:text-white">{item.nome}</p>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                      {item.leads} lead(s)
-                    </p>
-                  </div>
+            {vendedorRanking.length > 0 ? (
+              vendedorRanking.map((item, index) => (
+                <div
+                  key={`${item.nome}-${index}`}
+                  className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/70"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-slate-900 dark:text-white">{item.nome}</p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        {item.leads} lead(s)
+                      </p>
+                    </div>
 
-                  <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
-                    {fmt(item.valor)}
-                  </span>
+                    <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                      {fmt(item.valor)}
+                    </span>
+                  </div>
                 </div>
+              ))
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                Sem dados comerciais no momento.
               </div>
-            ))}
+            )}
           </div>
         </div>
       </section>
