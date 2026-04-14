@@ -1,7 +1,21 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Filter, FileText, Pencil, Trash2, Eye, ChevronDown, TriangleAlert as AlertTriangle } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  Plus,
+  Search,
+  Filter,
+  FileText,
+  Pencil,
+  Trash2,
+  Eye,
+  ChevronDown,
+  TriangleAlert as AlertTriangle,
+  Factory,
+  PackageCheck,
+  Clock3,
+  CheckCircle2,
+} from 'lucide-react';
 import { supabase, Pedido } from '@/lib/supabase';
 import PedidoForm from '@/components/pedidos/PedidoForm';
 import { gerarPedidoPDF } from '@/components/pedidos/pedidoPDF';
@@ -21,32 +35,26 @@ const ALL_STATUSES = [
 ];
 
 const STATUS_CONFIG: Record<string, { bg: string; text: string; dot: string }> = {
-  Aguardando:    { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: 'bg-amber-400' },
-  'Em Andamento':{ bg: 'bg-blue-100',    text: 'text-blue-700',    dot: 'bg-blue-400' },
-  'Em Produção': { bg: 'bg-violet-100',  text: 'text-violet-700',  dot: 'bg-violet-400' },
-  'Em Acabamento':{ bg: 'bg-sky-100',    text: 'text-sky-700',     dot: 'bg-sky-400' },
-  Pronto:        { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-400' },
-  Entregue:      { bg: 'bg-teal-100',    text: 'text-teal-700',    dot: 'bg-teal-400' },
-  Atrasado:      { bg: 'bg-red-100',     text: 'text-red-700',     dot: 'bg-red-400' },
-  Cancelado:     { bg: 'bg-slate-100',   text: 'text-slate-500',   dot: 'bg-slate-400' },
+  Aguardando: { bg: 'bg-amber-100 dark:bg-amber-500/10', text: 'text-amber-700 dark:text-amber-300', dot: 'bg-amber-400' },
+  'Em Andamento': { bg: 'bg-blue-100 dark:bg-blue-500/10', text: 'text-blue-700 dark:text-blue-300', dot: 'bg-blue-400' },
+  'Em Produção': { bg: 'bg-violet-100 dark:bg-violet-500/10', text: 'text-violet-700 dark:text-violet-300', dot: 'bg-violet-400' },
+  'Em Acabamento': { bg: 'bg-sky-100 dark:bg-sky-500/10', text: 'text-sky-700 dark:text-sky-300', dot: 'bg-sky-400' },
+  Pronto: { bg: 'bg-emerald-100 dark:bg-emerald-500/10', text: 'text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-400' },
+  Entregue: { bg: 'bg-teal-100 dark:bg-teal-500/10', text: 'text-teal-700 dark:text-teal-300', dot: 'bg-teal-400' },
+  Atrasado: { bg: 'bg-red-100 dark:bg-red-500/10', text: 'text-red-700 dark:text-red-300', dot: 'bg-red-400' },
+  Cancelado: { bg: 'bg-slate-100 dark:bg-slate-800', text: 'text-slate-600 dark:text-slate-300', dot: 'bg-slate-400' },
 };
 
 const FILTER_TABS = ['Todos', 'Aguardando', 'Em Andamento', 'Em Produção', 'Em Acabamento', 'Pronto', 'Entregue', 'Atrasado', 'Cancelado'];
-
-function StatusBadge({ status }: { status: string }) {
-  const cfg = STATUS_CONFIG[status] ?? { bg: 'bg-slate-100', text: 'text-slate-600', dot: 'bg-slate-400' };
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${cfg.bg} ${cfg.text}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-      {status}
-    </span>
-  );
-}
 
 function isAtrasado(pedido: Pedido): boolean {
   if (!pedido.prazo) return false;
   if (['Entregue', 'Cancelado'].includes(pedido.status)) return false;
   return new Date(pedido.prazo + 'T23:59:59') < new Date();
+}
+
+function getEffectiveStatus(pedido: Pedido) {
+  return isAtrasado(pedido) ? 'Atrasado' : pedido.status;
 }
 
 export default function PedidosPage() {
@@ -66,17 +74,22 @@ export default function PedidosPage() {
       .from('pedidos')
       .select('*')
       .order('created_at', { ascending: false });
+
     if (data) setLista(data);
     setLoading(false);
   }, []);
 
   useEffect(() => {
     fetchPedidos();
+
     const channel = supabase
       .channel('pedidos_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, fetchPedidos)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [fetchPedidos]);
 
   useEffect(() => {
@@ -85,23 +98,30 @@ export default function PedidosPage() {
     return () => document.removeEventListener('click', close);
   }, [actionMenuId]);
 
-  const filtered = lista.filter(p => {
-    const matchSearch =
-      p.cliente_nome.toLowerCase().includes(search.toLowerCase()) ||
-      p.numero.toLowerCase().includes(search.toLowerCase()) ||
-      (p.produto ?? '').toLowerCase().includes(search.toLowerCase());
-    const effectiveStatus = isAtrasado(p) ? 'Atrasado' : p.status;
-    const matchStatus = filterStatus === 'Todos' || effectiveStatus === filterStatus;
-    return matchSearch && matchStatus;
-  });
+  const filtered = useMemo(() => {
+    return lista.filter((p) => {
+      const matchSearch =
+        p.cliente_nome.toLowerCase().includes(search.toLowerCase()) ||
+        p.numero.toLowerCase().includes(search.toLowerCase()) ||
+        (p.produto ?? '').toLowerCase().includes(search.toLowerCase());
 
-  const counts = FILTER_TABS.slice(1).reduce((acc, s) => {
-    acc[s] = lista.filter(p => {
-      const eff = isAtrasado(p) ? 'Atrasado' : p.status;
-      return eff === s;
-    }).length;
-    return acc;
-  }, {} as Record<string, number>);
+      const effectiveStatus = getEffectiveStatus(p);
+      const matchStatus = filterStatus === 'Todos' || effectiveStatus === filterStatus;
+
+      return matchSearch && matchStatus;
+    });
+  }, [lista, search, filterStatus]);
+
+  const counts = useMemo(() => {
+    return FILTER_TABS.slice(1).reduce((acc, s) => {
+      acc[s] = lista.filter((p) => getEffectiveStatus(p) === s).length;
+      return acc;
+    }, {} as Record<string, number>);
+  }, [lista]);
+
+  const totalEmAberto = filtered
+    .filter((p) => !['Entregue', 'Cancelado'].includes(p.status))
+    .reduce((sum, p) => sum + p.valor, 0);
 
   const handleDelete = async (id: string) => {
     await supabase.from('pedidos').delete().eq('id', id);
@@ -109,7 +129,7 @@ export default function PedidosPage() {
   };
 
   const handleUpdateStatus = async (id: string, novoStatus: string) => {
-    await supabase.from('pedidos').update({ status: novoStatus }).eq('id', id);
+    await supabase.from('pedidos').update({ status: novoStatus, updated_at: new Date().toISOString() }).eq('id', id);
   };
 
   const handleEdit = (p: Pedido) => {
@@ -118,274 +138,385 @@ export default function PedidosPage() {
     setActionMenuId(null);
   };
 
+  const handleSave = async (data: Omit<Pedido, 'id' | 'created_at' | 'updated_at'>) => {
+    if (editingPedido) {
+      await supabase
+        .from('pedidos')
+        .update({ ...data, updated_at: new Date().toISOString() })
+        .eq('id', editingPedido.id);
+    } else {
+      await supabase.from('pedidos').insert(data);
+    }
+
+    setFormOpen(false);
+    setEditingPedido(null);
+  };
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
+      <div className="flex h-64 items-center justify-center">
+        <div className="h-7 w-7 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-        {FILTER_TABS.slice(1).map(s => {
+      <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Pedidos ativos</p>
+            <Clock3 className="h-4 w-4 text-sky-500" />
+          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">
+            {lista.filter((p) => !['Entregue', 'Cancelado'].includes(p.status)).length}
+          </p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Em acompanhamento comercial e operacional</p>
+        </div>
+
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Em produção</p>
+            <Factory className="h-4 w-4 text-violet-500" />
+          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">
+            {lista.filter((p) => p.status === 'Em Produção').length}
+          </p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Pedidos já liberados para a fábrica</p>
+        </div>
+
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Prontos / entrega</p>
+            <PackageCheck className="h-4 w-4 text-emerald-500" />
+          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">
+            {lista.filter((p) => ['Pronto', 'Entregue'].includes(p.status)).length}
+          </p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Pedidos já concluídos ou aguardando saída</p>
+        </div>
+
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Valor em aberto</p>
+            <CheckCircle2 className="h-4 w-4 text-cyan-500" />
+          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{fmt(totalEmAberto)}</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Baseado no filtro atual da listagem</p>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-2 gap-2 lg:grid-cols-4 xl:grid-cols-8">
+        {FILTER_TABS.slice(1).map((s) => {
           const cfg = STATUS_CONFIG[s];
           const isActive = filterStatus === s;
+
           return (
             <button
               key={s}
               onClick={() => setFilterStatus(filterStatus === s ? 'Todos' : s)}
-              className={`rounded-xl border-2 p-3 text-left transition-all ${isActive ? 'border-sky-500 bg-sky-50' : 'border-slate-200 bg-white hover:border-sky-200'}`}
+              className={`rounded-2xl border p-3 text-left transition-all ${
+                isActive
+                  ? 'border-sky-500 bg-sky-50 dark:border-sky-500/40 dark:bg-sky-500/10'
+                  : 'border-slate-200 bg-white hover:border-sky-200 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-sky-500/20'
+              }`}
             >
-              <div className={`w-2 h-2 rounded-full mb-2 ${cfg?.dot ?? 'bg-slate-400'}`} />
-              <p className="text-xs font-medium text-slate-500 leading-tight">{s}</p>
-              <p className="text-xl font-bold text-slate-800 mt-0.5">{counts[s] ?? 0}</p>
+              <div className={`mb-2 h-2 w-2 rounded-full ${cfg?.dot ?? 'bg-slate-400'}`} />
+              <p className="text-xs font-medium leading-tight text-slate-500 dark:text-slate-400">{s}</p>
+              <p className="mt-0.5 text-2xl font-bold text-slate-900 dark:text-white">{counts[s] ?? 0}</p>
             </button>
           );
         })}
-      </div>
+      </section>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
-          <div className="flex items-center gap-2 flex-wrap">
+      <section className="erp-card overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-slate-200/70 px-5 py-4 dark:border-slate-800 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Buscar pedido..."
-                className="pl-9 pr-4 h-9 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-sky-500 w-48"
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar pedido, cliente ou produto..."
+                className="erp-input w-72 pl-10"
               />
             </div>
+
             {filterStatus !== 'Todos' && (
               <button
                 onClick={() => setFilterStatus('Todos')}
-                className="h-9 px-3 text-xs text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg bg-white flex items-center gap-1"
+                className="erp-button-secondary h-11 px-3 py-0 text-xs"
               >
-                <Filter className="w-3.5 h-3.5" />
+                <Filter className="mr-1 h-3.5 w-3.5" />
                 {filterStatus} ×
               </button>
             )}
           </div>
+
           <button
-            onClick={() => { setEditingPedido(null); setFormOpen(true); }}
-            className="flex items-center gap-2 bg-sky-500 hover:bg-sky-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            onClick={() => {
+              setEditingPedido(null);
+              setFormOpen(true);
+            }}
+            className="erp-button-primary"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="mr-2 h-4 w-4" />
             Novo Pedido
           </button>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[1080px] text-sm">
             <thead>
-              <tr className="bg-slate-50">
-                {['Pedido', 'Cliente', 'Produto', 'Qtd', 'Valor', 'Orçamento', 'Status', 'Prazo', 'Ações'].map(h => (
-                  <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+              <tr className="bg-slate-50 dark:bg-slate-900/60">
+                {['Pedido', 'Cliente', 'Produto', 'Qtd', 'Valor', 'Orçamento', 'Status', 'Prazo', 'Ações'].map((h) => (
+                  <th
+                    key={h}
+                    className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+                  >
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filtered.map((p) => {
-                const atrasado = isAtrasado(p);
+                const effectiveStatus = getEffectiveStatus(p);
+                const cfg = STATUS_CONFIG[effectiveStatus] ?? STATUS_CONFIG.Aguardando;
+                const atrasado = effectiveStatus === 'Atrasado';
+
                 return (
-                  <tr key={p.id} className={`hover:bg-slate-50 transition-colors ${atrasado ? 'bg-red-50/40' : ''}`}>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="font-mono text-sky-600 font-semibold">{p.numero}</span>
+                  <tr key={p.id} className={`transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50 ${atrasado ? 'bg-red-50/40 dark:bg-red-500/5' : ''}`}>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <span className="font-mono font-semibold text-sky-600 dark:text-sky-400">{p.numero}</span>
                     </td>
-                    <td className="px-4 py-3 text-slate-800 font-medium whitespace-nowrap max-w-[140px] truncate">{p.cliente_nome}</td>
-                    <td className="px-4 py-3 text-slate-500 max-w-[160px] truncate">{p.produto}</td>
-                    <td className="px-4 py-3 text-slate-600 text-center">{p.quantidade.toLocaleString('pt-BR')}</td>
-                    <td className="px-4 py-3 text-slate-800 font-semibold whitespace-nowrap">{fmt(p.valor)}</td>
+
+                    <td className="max-w-[170px] truncate px-4 py-3 font-medium text-slate-800 dark:text-slate-100">
+                      {p.cliente_nome}
+                    </td>
+
+                    <td className="max-w-[180px] truncate px-4 py-3 text-slate-500 dark:text-slate-400">
+                      {p.produto}
+                    </td>
+
+                    <td className="px-4 py-3 text-center text-slate-600 dark:text-slate-300">
+                      {p.quantidade.toLocaleString('pt-BR')}
+                    </td>
+
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900 dark:text-white">
+                      {fmt(p.valor)}
+                    </td>
+
                     <td className="px-4 py-3">
                       {p.orcamento_numero ? (
-                        <span className="font-mono text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">{p.orcamento_numero}</span>
-                      ) : (
-                        <span className="text-slate-300 text-xs">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5">
-                        {atrasado && (
-                          <AlertTriangle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
-                        )}
-                        <div className="relative group">
-                          <button
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold cursor-pointer ${STATUS_CONFIG[p.status]?.bg ?? 'bg-slate-100'} ${STATUS_CONFIG[p.status]?.text ?? 'text-slate-600'}`}
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full ${STATUS_CONFIG[p.status]?.dot ?? 'bg-slate-400'}`} />
-                            {p.status}
-                            <ChevronDown className="w-3 h-3 opacity-60" />
-                          </button>
-                          <div className="absolute top-full mt-1 left-0 bg-white border border-slate-200 rounded-xl shadow-xl z-20 hidden group-hover:block min-w-max overflow-hidden">
-                            {ALL_STATUSES.map(s => (
-                              <button
-                                key={s}
-                                onClick={() => handleUpdateStatus(p.id, s)}
-                                className={`w-full text-left px-4 py-2 text-xs hover:bg-slate-50 flex items-center gap-2 ${p.status === s ? 'font-semibold' : ''}`}
-                              >
-                                <span className={`w-1.5 h-1.5 rounded-full ${STATUS_CONFIG[s]?.dot ?? 'bg-slate-300'}`} />
-                                {s}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      {p.prazo ? (
-                        <span className={`text-sm ${atrasado ? 'text-red-600 font-semibold' : 'text-slate-500'}`}>
-                          {new Date(p.prazo + 'T00:00:00').toLocaleDateString('pt-BR')}
+                        <span className="rounded-full bg-slate-100 px-2 py-1 font-mono text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                          {p.orcamento_numero}
                         </span>
                       ) : (
-                        <span className="text-slate-300">—</span>
+                        <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
                       )}
                     </td>
+
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${cfg.bg} ${cfg.text}`}>
+                        {atrasado && <AlertTriangle className="h-3.5 w-3.5" />}
+                        <span className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
+                        {effectiveStatus}
+                      </span>
+                    </td>
+
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-600 dark:text-slate-300">
+                      {p.prazo ? new Date(p.prazo + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}
+                    </td>
+
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
                         <button
                           onClick={() => setDetailPedido(p)}
+                          className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-sky-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-sky-400"
                           title="Ver detalhes"
-                          className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-colors"
                         >
-                          <Eye className="w-3.5 h-3.5" />
+                          <Eye className="h-4 w-4" />
                         </button>
+
                         <button
                           onClick={() => handleEdit(p)}
+                          className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-sky-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-sky-400"
                           title="Editar"
-                          className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
                         >
-                          <Pencil className="w-3.5 h-3.5" />
+                          <Pencil className="h-4 w-4" />
                         </button>
+
                         <button
                           onClick={() => gerarPedidoPDF(p)}
+                          className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-emerald-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-emerald-400"
                           title="Gerar PDF"
-                          className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
                         >
-                          <FileText className="w-3.5 h-3.5" />
+                          <FileText className="h-4 w-4" />
                         </button>
+
+                        <div className="relative">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActionMenuId(actionMenuId === p.id ? null : p.id);
+                            }}
+                            className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                            title="Alterar status"
+                          >
+                            <ChevronDown className="h-4 w-4" />
+                          </button>
+
+                          {actionMenuId === p.id && (
+                            <div
+                              className="absolute right-0 z-20 mt-2 w-44 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-800 dark:bg-slate-900"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {ALL_STATUSES.map((status) => (
+                                <button
+                                  key={status}
+                                  onClick={() => {
+                                    handleUpdateStatus(p.id, status);
+                                    setActionMenuId(null);
+                                  }}
+                                  className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                                >
+                                  {status}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
                         <button
                           onClick={() => setDeleteConfirm(p.id)}
+                          className="rounded-xl p-2 text-slate-500 transition hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-500/10 dark:hover:text-red-400"
                           title="Excluir"
-                          className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     </td>
                   </tr>
                 );
               })}
+
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400">
+                    Nenhum pedido encontrado com os filtros atuais.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
-          {filtered.length === 0 && (
-            <div className="text-center py-12 text-slate-400 text-sm">Nenhum pedido encontrado.</div>
-          )}
         </div>
+      </section>
 
-        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-          <p className="text-xs text-slate-400">{filtered.length} pedido(s) exibido(s)</p>
-          <p className="text-xs text-slate-400">Total: {fmt(filtered.reduce((s, p) => s + p.valor, 0))}</p>
-        </div>
-      </div>
-
-      {formOpen && (
-        <PedidoForm
-          pedido={editingPedido}
-          onClose={() => { setFormOpen(false); setEditingPedido(null); }}
-          onSaved={fetchPedidos}
-        />
-      )}
+      <PedidoForm
+        open={formOpen}
+        onClose={() => {
+          setFormOpen(false);
+          setEditingPedido(null);
+        }}
+        onSave={handleSave}
+        pedido={
+          editingPedido
+            ? {
+                id: editingPedido.id,
+                numero: editingPedido.numero,
+                cliente_id: editingPedido.cliente_id,
+                cliente_nome: editingPedido.cliente_nome,
+                orcamento_id: editingPedido.orcamento_id,
+                orcamento_numero: editingPedido.orcamento_numero || null,
+                produto: editingPedido.produto,
+                quantidade: editingPedido.quantidade,
+                valor: editingPedido.valor,
+                status: editingPedido.status,
+                prazo: editingPedido.prazo,
+                observacoes: editingPedido.observacoes,
+              }
+            : null
+        }
+      />
 
       {detailPedido && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDetailPedido(null)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDetailPedido(null)} />
+          <div className="relative z-10 w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+            <div className="mb-6 flex items-start justify-between gap-4">
               <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-sky-600 font-bold text-lg">{detailPedido.numero}</span>
-                  <StatusBadge status={isAtrasado(detailPedido) ? 'Atrasado' : detailPedido.status} />
-                </div>
-                <p className="text-sm text-slate-500 mt-0.5">{detailPedido.cliente_nome}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Pedido</p>
+                <h3 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">{detailPedido.numero}</h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{detailPedido.cliente_nome}</p>
               </div>
+
               <button
                 onClick={() => setDetailPedido(null)}
-                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                className="erp-button-secondary px-3 py-2 text-xs"
               >
-                ×
+                Fechar
               </button>
             </div>
-            <div className="p-6 space-y-4">
-              {isAtrasado(detailPedido) && (
-                <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-red-700 text-sm font-medium">
-                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                  Pedido atrasado — prazo em {new Date(detailPedido.prazo! + 'T00:00:00').toLocaleDateString('pt-BR')}
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  ['Produto', detailPedido.produto],
-                  ['Quantidade', detailPedido.quantidade.toLocaleString('pt-BR')],
-                  ['Valor', fmt(detailPedido.valor)],
-                  ['Prazo', detailPedido.prazo ? new Date(detailPedido.prazo + 'T00:00:00').toLocaleDateString('pt-BR') : '—'],
-                  ['Orçamento', detailPedido.orcamento_numero || '—'],
-                  ['Criado em', new Date(detailPedido.created_at).toLocaleDateString('pt-BR')],
-                ].map(([label, value]) => (
-                  <div key={label} className="bg-slate-50 rounded-lg p-3">
-                    <p className="text-xs text-slate-400 font-semibold uppercase tracking-wide mb-1">{label}</p>
-                    <p className="text-sm font-semibold text-slate-800">{value}</p>
-                  </div>
-                ))}
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="erp-card p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Produto</p>
+                <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">{detailPedido.produto}</p>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Quantidade: {detailPedido.quantidade.toLocaleString('pt-BR')}</p>
               </div>
-              {detailPedido.observacoes && (
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-xs text-slate-400 font-semibold uppercase tracking-wide mb-1">Observações</p>
-                  <p className="text-sm text-slate-600">{detailPedido.observacoes}</p>
+
+              <div className="erp-card p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Financeiro</p>
+                <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">{fmt(detailPedido.valor)}</p>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Prazo: {detailPedido.prazo ? new Date(detailPedido.prazo + 'T00:00:00').toLocaleDateString('pt-BR') : 'Não informado'}
+                </p>
+              </div>
+
+              <div className="erp-card p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Status atual</p>
+                <div className="mt-3">
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_CONFIG[getEffectiveStatus(detailPedido)].bg} ${STATUS_CONFIG[getEffectiveStatus(detailPedido)].text}`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${STATUS_CONFIG[getEffectiveStatus(detailPedido)].dot}`} />
+                    {getEffectiveStatus(detailPedido)}
+                  </span>
                 </div>
-              )}
+              </div>
+
+              <div className="erp-card p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Origem</p>
+                <p className="mt-2 text-sm text-slate-700 dark:text-slate-200">
+                  {detailPedido.orcamento_numero ? `Convertido do orçamento ${detailPedido.orcamento_numero}` : 'Pedido criado diretamente'}
+                </p>
+              </div>
             </div>
-            <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-100 bg-slate-50">
-              <button
-                onClick={() => { gerarPedidoPDF(detailPedido); }}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-emerald-600 border border-emerald-200 rounded-lg hover:bg-emerald-50 transition-colors"
-              >
-                <FileText className="w-4 h-4" />
-                Gerar PDF
-              </button>
-              <button
-                onClick={() => { handleEdit(detailPedido); setDetailPedido(null); }}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-sky-500 hover:bg-sky-600 text-white rounded-lg transition-colors"
-              >
-                <Pencil className="w-4 h-4" />
-                Editar
-              </button>
+
+            <div className="mt-4 erp-card p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Observações</p>
+              <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200">
+                {detailPedido.observacoes?.trim() || 'Sem observações cadastradas.'}
+              </p>
             </div>
           </div>
         </div>
       )}
 
       {deleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4 mx-auto">
-              <Trash2 className="w-5 h-5 text-red-600" />
-            </div>
-            <h3 className="text-center font-semibold text-slate-800 mb-2">Excluir pedido?</h3>
-            <p className="text-center text-sm text-slate-500 mb-6">Esta ação não pode ser desfeita.</p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setDeleteConfirm(null)}
-                className="flex-1 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors"
-              >
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)} />
+          <div className="relative z-10 w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Excluir pedido</h3>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+              Essa ação não poderá ser desfeita. Tem certeza que deseja excluir este pedido?
+            </p>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button onClick={() => setDeleteConfirm(null)} className="erp-button-secondary">
                 Cancelar
               </button>
-              <button
-                onClick={() => handleDelete(deleteConfirm)}
-                className="flex-1 py-2 text-sm bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors font-medium"
-              >
+              <button onClick={() => handleDelete(deleteConfirm)} className="inline-flex items-center justify-center rounded-2xl bg-red-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-600">
                 Excluir
               </button>
             </div>
