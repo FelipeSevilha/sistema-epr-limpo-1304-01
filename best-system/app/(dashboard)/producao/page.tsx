@@ -12,6 +12,10 @@ import {
   PauseCircle,
   CircleDollarSign,
   TrendingUp,
+  Printer,
+  Scissors,
+  Package,
+  Cog,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
@@ -59,6 +63,18 @@ type EstoqueItem = {
   updated_at?: string;
 };
 
+type CostBreakdown = {
+  material: number;
+  impressao: number;
+  acabamento: number;
+  operacional: number;
+  total: number;
+};
+
+type OrdemProducaoView = OrdemProducao & {
+  costBreakdown: CostBreakdown;
+};
+
 const fmt = (v: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
 
@@ -70,42 +86,112 @@ const statusConfig: Record<OrdemStatus, string> = {
   Finalizada: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
 };
 
+function normalizeText(value: string) {
+  return (value || '').toLowerCase().trim();
+}
+
+function inferGroup(materialName: string, categoria: string) {
+  const text = `${materialName} ${categoria}`.toLowerCase();
+
+  if (
+    text.includes('impress') ||
+    text.includes('pb') ||
+    text.includes('p&b') ||
+    text.includes('colorid') ||
+    text.includes('cmyk') ||
+    text.includes('toner')
+  ) {
+    return 'impressao';
+  }
+
+  if (
+    text.includes('wire') ||
+    text.includes('bopp') ||
+    text.includes('lamina') ||
+    text.includes('laminação') ||
+    text.includes('laminacao') ||
+    text.includes('verniz') ||
+    text.includes('faca') ||
+    text.includes('corte') ||
+    text.includes('vinco') ||
+    text.includes('dobr') ||
+    text.includes('espiral') ||
+    text.includes('acabamento')
+  ) {
+    return 'acabamento';
+  }
+
+  return 'material';
+}
+
+function calculateOperationalCost(
+  quantidade: number,
+  material: number,
+  impressao: number,
+  acabamento: number
+) {
+  const baseMovimentacao = quantidade * 0.12;
+  const baseSetup = 18;
+  const percentual = (material + impressao + acabamento) * 0.08;
+  return Number((baseMovimentacao + baseSetup + percentual).toFixed(2));
+}
+
+function buildCostBreakdown(
+  produtoNome: string,
+  quantidadeProducao: number,
+  ficha: FichaTecnicaItem[],
+  estoque: EstoqueItem[]
+): CostBreakdown {
+  const materiais = ficha.filter((f) => normalizeText(f.produto_nome) === normalizeText(produtoNome));
+
+  let material = 0;
+  let impressao = 0;
+  let acabamento = 0;
+
+  for (const item of materiais) {
+    const itemEstoque = estoque.find(
+      (e) => normalizeText(e.item) === normalizeText(item.material_nome)
+    );
+
+    if (!itemEstoque) continue;
+
+    const consumoTotal = Number(item.quantidade || 0) * Number(quantidadeProducao || 0);
+    const custoItem = consumoTotal * Number(itemEstoque.valor_unitario || 0);
+    const group = inferGroup(item.material_nome, itemEstoque.categoria || '');
+
+    if (group === 'impressao') {
+      impressao += custoItem;
+    } else if (group === 'acabamento') {
+      acabamento += custoItem;
+    } else {
+      material += custoItem;
+    }
+  }
+
+  const operacional = calculateOperationalCost(
+    quantidadeProducao,
+    material,
+    impressao,
+    acabamento
+  );
+
+  const total = material + impressao + acabamento + operacional;
+
+  return {
+    material: Number(material.toFixed(2)),
+    impressao: Number(impressao.toFixed(2)),
+    acabamento: Number(acabamento.toFixed(2)),
+    operacional: Number(operacional.toFixed(2)),
+    total: Number(total.toFixed(2)),
+  };
+}
+
 export default function ProducaoPage() {
   const [search, setSearch] = useState('');
-  const [lista, setLista] = useState<OrdemProducao[]>([]);
+  const [lista, setLista] = useState<OrdemProducaoView[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFiltro, setStatusFiltro] = useState<'Todos' | OrdemStatus>('Todos');
   const [error, setError] = useState('');
-
-  async function calcularCustoPrevisto(
-    produtoNome: string,
-    quantidadeProducao: number,
-    ficha: FichaTecnicaItem[],
-    estoque: EstoqueItem[]
-  ) {
-    const materiais = ficha.filter((f) => f.produto_nome === produtoNome);
-
-    if (!materiais.length) {
-      return 0;
-    }
-
-    let custoTotal = 0;
-
-    for (const material of materiais) {
-      const itemEstoque = estoque.find(
-        (e) => e.item.toLowerCase() === material.material_nome.toLowerCase()
-      );
-
-      if (!itemEstoque) continue;
-
-      const consumoTotal = Number(material.quantidade || 0) * Number(quantidadeProducao || 0);
-      const custoMaterial = consumoTotal * Number(itemEstoque.valor_unitario || 0);
-
-      custoTotal += custoMaterial;
-    }
-
-    return Number(custoTotal.toFixed(2));
-  }
 
   async function fetchOrdens() {
     try {
@@ -135,16 +221,18 @@ export default function ProducaoPage() {
       const fichaBase = (ficha as FichaTecnicaItem[]) || [];
       const estoqueBase = (estoque as EstoqueItem[]) || [];
 
-      const ordensAtualizadas: OrdemProducao[] = [];
+      const ordensAtualizadas: OrdemProducaoView[] = [];
 
       for (const op of ordensBase) {
-        const materiais = fichaBase.filter((f) => f.produto_nome === op.produto);
+        const materiais = fichaBase.filter(
+          (f) => normalizeText(f.produto_nome) === normalizeText(op.produto || '')
+        );
 
         let materiais_ok = true;
 
         for (const mat of materiais) {
           const itemEstoque = estoqueBase.find(
-            (e) => e.item.toLowerCase() === mat.material_nome.toLowerCase()
+            (e) => normalizeText(e.item) === normalizeText(mat.material_nome)
           );
 
           if (!itemEstoque || Number(itemEstoque.quantidade) < Number(mat.quantidade) * Number(op.quantidade || 0)) {
@@ -152,17 +240,18 @@ export default function ProducaoPage() {
           }
         }
 
-        const custo_previsto = await calcularCustoPrevisto(
+        const breakdown = buildCostBreakdown(
           op.produto || '',
           Number(op.quantidade || 0),
           fichaBase,
           estoqueBase
         );
 
-        const ordemAtualizada = {
+        const ordemAtualizada: OrdemProducaoView = {
           ...op,
           materiais_ok,
-          custo_previsto,
+          custo_previsto: breakdown.total,
+          costBreakdown: breakdown,
         };
 
         ordensAtualizadas.push(ordemAtualizada);
@@ -171,7 +260,7 @@ export default function ProducaoPage() {
           .from('ordens_producao')
           .update({
             materiais_ok,
-            custo_previsto,
+            custo_previsto: breakdown.total,
             updated_at: new Date().toISOString(),
           })
           .eq('id', op.id);
@@ -202,7 +291,7 @@ export default function ProducaoPage() {
     });
   }, [lista, search, statusFiltro]);
 
-  async function updateStatus(op: OrdemProducao, status: OrdemStatus, progresso?: number) {
+  async function updateStatus(op: OrdemProducaoView, status: OrdemStatus, progresso?: number) {
     try {
       const { error } = await supabase
         .from('ordens_producao')
@@ -244,7 +333,7 @@ export default function ProducaoPage() {
     }
   }
 
-  async function iniciarProducao(op: OrdemProducao) {
+  async function iniciarProducao(op: OrdemProducaoView) {
     try {
       const { data: ficha, error: fichaError } = await supabase
         .from('ficha_tecnica')
@@ -271,7 +360,7 @@ export default function ProducaoPage() {
 
       for (const item of materiais) {
         const est = estoqueBase.find(
-          (e) => e.item.toLowerCase() === item.material_nome.toLowerCase()
+          (e) => normalizeText(e.item) === normalizeText(item.material_nome)
         );
 
         if (!est || Number(est.quantidade) < Number(item.quantidade) * Number(op.quantidade || 0)) {
@@ -286,7 +375,7 @@ export default function ProducaoPage() {
 
       for (const item of materiais) {
         const est = estoqueBase.find(
-          (e) => e.item.toLowerCase() === item.material_nome.toLowerCase()
+          (e) => normalizeText(e.item) === normalizeText(item.material_nome)
         );
 
         if (!est) continue;
@@ -316,7 +405,7 @@ export default function ProducaoPage() {
     prontas: lista.filter((i) => i.status === 'Pronta para produção').length,
     producao: lista.filter((i) => i.status === 'Em produção').length,
     finalizadas: lista.filter((i) => i.status === 'Finalizada').length,
-    custoTotal: lista.reduce((sum, i) => sum + Number(i.custo_previsto || 0), 0),
+    custoTotal: lista.reduce((sum, i) => sum + Number(i.costBreakdown.total || 0), 0),
   };
 
   if (loading) {
@@ -373,7 +462,7 @@ export default function ProducaoPage() {
         <div className="erp-card p-5">
           <div className="mb-3 flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Custo previsto total
+              Custo total
             </p>
             <CircleDollarSign className="h-4 w-4 text-cyan-500" />
           </div>
@@ -457,9 +546,9 @@ export default function ProducaoPage() {
                   </div>
 
                   <div className="rounded-2xl bg-slate-50 p-3 dark:bg-slate-950">
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Custo previsto</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Custo total</p>
                     <p className="mt-1 text-base font-semibold text-slate-900 dark:text-white">
-                      {fmt(Number(op.custo_previsto || 0))}
+                      {fmt(Number(op.costBreakdown.total || 0))}
                     </p>
                   </div>
 
@@ -467,8 +556,58 @@ export default function ProducaoPage() {
                     <p className="text-xs text-slate-500 dark:text-slate-400">Custo unit.</p>
                     <p className="mt-1 text-base font-semibold text-slate-900 dark:text-white">
                       {Number(op.quantidade || 0) > 0
-                        ? fmt(Number(op.custo_previsto || 0) / Number(op.quantidade || 0))
+                        ? fmt(Number(op.costBreakdown.total || 0) / Number(op.quantidade || 0))
                         : fmt(0)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/70">
+                    <div className="flex items-center gap-2">
+                      <Package className="h-4 w-4 text-sky-500" />
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                        Matéria-prima
+                      </p>
+                    </div>
+                    <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">
+                      {fmt(op.costBreakdown.material)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/70">
+                    <div className="flex items-center gap-2">
+                      <Printer className="h-4 w-4 text-violet-500" />
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                        Impressão
+                      </p>
+                    </div>
+                    <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">
+                      {fmt(op.costBreakdown.impressao)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/70">
+                    <div className="flex items-center gap-2">
+                      <Scissors className="h-4 w-4 text-amber-500" />
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                        Acabamento
+                      </p>
+                    </div>
+                    <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">
+                      {fmt(op.costBreakdown.acabamento)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/70">
+                    <div className="flex items-center gap-2">
+                      <Cog className="h-4 w-4 text-emerald-500" />
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                        Operacional
+                      </p>
+                    </div>
+                    <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">
+                      {fmt(op.costBreakdown.operacional)}
                     </p>
                   </div>
                 </div>
@@ -504,7 +643,7 @@ export default function ProducaoPage() {
                     </p>
                   </div>
                   <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                    Essa ordem já calcula custo previsto com base na ficha técnica e no valor unitário do estoque.
+                    Agora a ordem separa custo de matéria-prima, impressão, acabamento e operacional.
                   </p>
                 </div>
 
