@@ -2,416 +2,200 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
+  CalendarDays,
+  ChevronRight,
+  Clock3,
   Factory,
-  Boxes,
-  CheckCircle2,
-  Search,
-  ShieldAlert,
+  Flag,
   Layers3,
-  PlayCircle,
-  PauseCircle,
-  CircleDollarSign,
-  TrendingUp,
-  Printer,
-  Scissors,
-  Package,
-  Cog,
+  PackageCheck,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
-type OrdemStatus =
-  | 'Aguardando material'
-  | 'Pronta para produção'
-  | 'Em produção'
-  | 'Pausada'
-  | 'Finalizada';
-
-type OrdemProducao = {
+type OrdemItem = {
   id: string;
   pedido_id?: string | null;
-  pedido_numero: string;
+  pedido_numero?: string | null;
   cliente_nome?: string | null;
+  produto_nome?: string | null;
   produto?: string | null;
   quantidade?: number | null;
-  status: OrdemStatus;
+  etapa?: string | null;
+  status?: string | null;
+  prioridade?: string | null;
   prazo?: string | null;
-  progresso?: number | null;
-  materiais_ok?: boolean | null;
-  custo_previsto?: number | null;
   created_at?: string | null;
-  updated_at?: string | null;
 };
 
-type FichaTecnicaItem = {
-  id: string;
-  produto_nome: string;
-  material_nome: string;
-  quantidade: number;
-  unidade: string;
-};
+const ETAPAS = [
+  'Aguardando',
+  'Pré-impressão',
+  'Impressão',
+  'Acabamento',
+  'Finalizado',
+];
 
-type EstoqueItem = {
-  id: string;
-  item: string;
-  categoria: string;
-  quantidade: number;
-  unidade: string;
-  estoque_minimo: number;
-  fornecedor: string;
-  valor_unitario: number;
-  created_at?: string;
-  updated_at?: string;
-};
+const PRIORIDADES = ['Baixa', 'Normal', 'Alta', 'Urgente'];
 
-type CostBreakdown = {
-  material: number;
-  impressao: number;
-  acabamento: number;
-  operacional: number;
-  total: number;
-};
-
-type OrdemProducaoView = OrdemProducao & {
-  costBreakdown: CostBreakdown;
-};
-
-const fmt = (v: number) =>
-  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
-
-const statusConfig: Record<OrdemStatus, string> = {
-  'Aguardando material': 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
-  'Pronta para produção': 'bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300',
-  'Em produção': 'bg-violet-100 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300',
-  Pausada: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-  Finalizada: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
-};
-
-function normalizeText(value: string) {
-  return (value || '').toLowerCase().trim();
+function getProdutoNome(ordem: OrdemItem) {
+  return ordem.produto_nome || ordem.produto || 'Sem produto';
 }
 
-function inferGroup(materialName: string, categoria: string) {
-  const text = `${materialName} ${categoria}`.toLowerCase();
-
-  if (
-    text.includes('impress') ||
-    text.includes('pb') ||
-    text.includes('p&b') ||
-    text.includes('colorid') ||
-    text.includes('cmyk') ||
-    text.includes('toner')
-  ) {
-    return 'impressao';
-  }
-
-  if (
-    text.includes('wire') ||
-    text.includes('bopp') ||
-    text.includes('lamina') ||
-    text.includes('laminação') ||
-    text.includes('laminacao') ||
-    text.includes('verniz') ||
-    text.includes('faca') ||
-    text.includes('corte') ||
-    text.includes('vinco') ||
-    text.includes('dobr') ||
-    text.includes('espiral') ||
-    text.includes('acabamento')
-  ) {
-    return 'acabamento';
-  }
-
-  return 'material';
+function getPrioridade(ordem: OrdemItem) {
+  return ordem.prioridade || 'Normal';
 }
 
-function calculateOperationalCost(
-  quantidade: number,
-  material: number,
-  impressao: number,
-  acabamento: number
-) {
-  const baseMovimentacao = quantidade * 0.12;
-  const baseSetup = 18;
-  const percentual = (material + impressao + acabamento) * 0.08;
-  return Number((baseMovimentacao + baseSetup + percentual).toFixed(2));
+function getPrazo(ordem: OrdemItem) {
+  return ordem.prazo || null;
 }
 
-function buildCostBreakdown(
-  produtoNome: string,
-  quantidadeProducao: number,
-  ficha: FichaTecnicaItem[],
-  estoque: EstoqueItem[]
-): CostBreakdown {
-  const materiais = ficha.filter((f) => normalizeText(f.produto_nome) === normalizeText(produtoNome));
+function isAtrasado(ordem: OrdemItem) {
+  if (!ordem.prazo) return false;
+  if ((ordem.etapa || '') === 'Finalizado') return false;
 
-  let material = 0;
-  let impressao = 0;
-  let acabamento = 0;
+  const hoje = new Date();
+  const prazo = new Date(`${ordem.prazo}T23:59:59`);
+  return prazo < hoje;
+}
 
-  for (const item of materiais) {
-    const itemEstoque = estoque.find(
-      (e) => normalizeText(e.item) === normalizeText(item.material_nome)
-    );
-
-    if (!itemEstoque) continue;
-
-    const consumoTotal = Number(item.quantidade || 0) * Number(quantidadeProducao || 0);
-    const custoItem = consumoTotal * Number(itemEstoque.valor_unitario || 0);
-    const group = inferGroup(item.material_nome, itemEstoque.categoria || '');
-
-    if (group === 'impressao') {
-      impressao += custoItem;
-    } else if (group === 'acabamento') {
-      acabamento += custoItem;
-    } else {
-      material += custoItem;
-    }
+function prioridadeClasse(prioridade: string) {
+  switch (prioridade) {
+    case 'Urgente':
+      return 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300';
+    case 'Alta':
+      return 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300';
+    case 'Baixa':
+      return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+    default:
+      return 'bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300';
   }
+}
 
-  const operacional = calculateOperationalCost(
-    quantidadeProducao,
-    material,
-    impressao,
-    acabamento
-  );
-
-  const total = material + impressao + acabamento + operacional;
-
-  return {
-    material: Number(material.toFixed(2)),
-    impressao: Number(impressao.toFixed(2)),
-    acabamento: Number(acabamento.toFixed(2)),
-    operacional: Number(operacional.toFixed(2)),
-    total: Number(total.toFixed(2)),
-  };
+function etapaHeaderClasse(etapa: string) {
+  switch (etapa) {
+    case 'Aguardando':
+      return 'border-slate-200 dark:border-slate-800';
+    case 'Pré-impressão':
+      return 'border-sky-200 dark:border-sky-500/20';
+    case 'Impressão':
+      return 'border-violet-200 dark:border-violet-500/20';
+    case 'Acabamento':
+      return 'border-amber-200 dark:border-amber-500/20';
+    case 'Finalizado':
+      return 'border-emerald-200 dark:border-emerald-500/20';
+    default:
+      return 'border-slate-200 dark:border-slate-800';
+  }
 }
 
 export default function ProducaoPage() {
-  const [search, setSearch] = useState('');
-  const [lista, setLista] = useState<OrdemProducaoView[]>([]);
+  const [ordens, setOrdens] = useState<OrdemItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFiltro, setStatusFiltro] = useState<'Todos' | OrdemStatus>('Todos');
   const [error, setError] = useState('');
 
-  async function fetchOrdens() {
+  async function carregar() {
     try {
       setLoading(true);
       setError('');
 
-      const { data: ordens, error: ordensError } = await supabase
+      const { data, error } = await supabase
         .from('ordens_producao')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (ordensError) throw ordensError;
+      if (error) throw error;
 
-      const { data: ficha, error: fichaError } = await supabase
-        .from('ficha_tecnica')
-        .select('*');
-
-      if (fichaError) throw fichaError;
-
-      const { data: estoque, error: estoqueError } = await supabase
-        .from('estoque')
-        .select('*');
-
-      if (estoqueError) throw estoqueError;
-
-      const ordensBase = (ordens as OrdemProducao[]) || [];
-      const fichaBase = (ficha as FichaTecnicaItem[]) || [];
-      const estoqueBase = (estoque as EstoqueItem[]) || [];
-
-      const ordensAtualizadas: OrdemProducaoView[] = [];
-
-      for (const op of ordensBase) {
-        const materiais = fichaBase.filter(
-          (f) => normalizeText(f.produto_nome) === normalizeText(op.produto || '')
-        );
-
-        let materiais_ok = true;
-
-        for (const mat of materiais) {
-          const itemEstoque = estoqueBase.find(
-            (e) => normalizeText(e.item) === normalizeText(mat.material_nome)
-          );
-
-          if (!itemEstoque || Number(itemEstoque.quantidade) < Number(mat.quantidade) * Number(op.quantidade || 0)) {
-            materiais_ok = false;
-          }
-        }
-
-        const breakdown = buildCostBreakdown(
-          op.produto || '',
-          Number(op.quantidade || 0),
-          fichaBase,
-          estoqueBase
-        );
-
-        const ordemAtualizada: OrdemProducaoView = {
-          ...op,
-          materiais_ok,
-          custo_previsto: breakdown.total,
-          costBreakdown: breakdown,
-        };
-
-        ordensAtualizadas.push(ordemAtualizada);
-
-        await supabase
-          .from('ordens_producao')
-          .update({
-            materiais_ok,
-            custo_previsto: breakdown.total,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', op.id);
-      }
-
-      setLista(ordensAtualizadas);
+      setOrdens((data as OrdemItem[]) || []);
     } catch (err: any) {
       console.error(err);
-      setError(err?.message || 'Erro ao validar produção');
+      setError(err?.message || 'Erro ao carregar produção');
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    fetchOrdens();
-  }, []);
-
-  const filtered = useMemo(() => {
-    return lista.filter((op) => {
-      const matchSearch =
-        (op.pedido_numero || '').toLowerCase().includes(search.toLowerCase()) ||
-        (op.cliente_nome || '').toLowerCase().includes(search.toLowerCase()) ||
-        (op.produto || '').toLowerCase().includes(search.toLowerCase());
-
-      const matchStatus = statusFiltro === 'Todos' || op.status === statusFiltro;
-      return matchSearch && matchStatus;
-    });
-  }, [lista, search, statusFiltro]);
-
-  async function updateStatus(op: OrdemProducaoView, status: OrdemStatus, progresso?: number) {
+  async function mover(id: string, novaEtapa: string) {
     try {
+      const updates: Record<string, any> = {
+        etapa: novaEtapa,
+      };
+
+      if (novaEtapa === 'Finalizado') {
+        updates.status = 'Finalizado';
+      } else {
+        updates.status = 'Em produção';
+      }
+
       const { error } = await supabase
         .from('ordens_producao')
-        .update({
-          status,
-          progresso:
-            progresso !== undefined
-              ? progresso
-              : status === 'Finalizada'
-              ? 100
-              : op.progresso || 0,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', op.id);
+        .update(updates)
+        .eq('id', id);
 
       if (error) throw error;
 
-      if (op.pedido_id) {
-        const pedidoStatus =
-          status === 'Finalizada'
-            ? 'Pronto'
-            : status === 'Em produção'
-            ? 'Em Produção'
-            : 'Em Andamento';
-
-        await supabase
-          .from('pedidos')
-          .update({
-            status: pedidoStatus,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', op.pedido_id);
-      }
-
-      fetchOrdens();
+      carregar();
     } catch (err: any) {
       console.error(err);
-      alert(err?.message || 'Erro ao atualizar produção');
+      alert(err?.message || 'Erro ao mover etapa');
     }
   }
 
-  async function iniciarProducao(op: OrdemProducaoView) {
+  async function atualizarPrioridade(id: string, prioridade: string) {
     try {
-      const { data: ficha, error: fichaError } = await supabase
-        .from('ficha_tecnica')
-        .select('*')
-        .eq('produto_nome', op.produto || '');
+      const { error } = await supabase
+        .from('ordens_producao')
+        .update({ prioridade })
+        .eq('id', id);
 
-      if (fichaError) throw fichaError;
+      if (error) throw error;
 
-      const { data: estoque, error: estoqueError } = await supabase
-        .from('estoque')
-        .select('*');
-
-      if (estoqueError) throw estoqueError;
-
-      const materiais = (ficha as FichaTecnicaItem[]) || [];
-      const estoqueBase = (estoque as EstoqueItem[]) || [];
-
-      if (!materiais.length) {
-        alert('Produto sem ficha técnica.');
-        return;
-      }
-
-      let podeProduzir = true;
-
-      for (const item of materiais) {
-        const est = estoqueBase.find(
-          (e) => normalizeText(e.item) === normalizeText(item.material_nome)
-        );
-
-        if (!est || Number(est.quantidade) < Number(item.quantidade) * Number(op.quantidade || 0)) {
-          podeProduzir = false;
-        }
-      }
-
-      if (!podeProduzir) {
-        alert('Sem material suficiente para iniciar produção.');
-        return;
-      }
-
-      for (const item of materiais) {
-        const est = estoqueBase.find(
-          (e) => normalizeText(e.item) === normalizeText(item.material_nome)
-        );
-
-        if (!est) continue;
-
-        const novaQtd =
-          Number(est.quantidade) - Number(item.quantidade) * Number(op.quantidade || 0);
-
-        await supabase
-          .from('estoque')
-          .update({
-            quantidade: novaQtd,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', est.id);
-      }
-
-      await updateStatus(op, 'Em produção', Math.max(Number(op.progresso || 0), 10));
-      alert('Produção iniciada e estoque atualizado com sucesso.');
+      carregar();
     } catch (err: any) {
       console.error(err);
-      alert(err?.message || 'Erro ao iniciar produção');
+      alert(err?.message || 'Erro ao atualizar prioridade');
     }
   }
 
-  const stats = {
-    aguardando: lista.filter((i) => i.status === 'Aguardando material').length,
-    prontas: lista.filter((i) => i.status === 'Pronta para produção').length,
-    producao: lista.filter((i) => i.status === 'Em produção').length,
-    finalizadas: lista.filter((i) => i.status === 'Finalizada').length,
-    custoTotal: lista.reduce((sum, i) => sum + Number(i.costBreakdown.total || 0), 0),
-  };
+  useEffect(() => {
+    carregar();
+  }, []);
+
+  const resumo = useMemo(() => {
+    const total = ordens.length;
+    const atrasadas = ordens.filter((o) => isAtrasado(o)).length;
+    const urgentes = ordens.filter((o) => getPrioridade(o) === 'Urgente').length;
+    const finalizadas = ordens.filter((o) => (o.etapa || '') === 'Finalizado').length;
+
+    const gargalo = ETAPAS
+      .map((etapa) => ({
+        etapa,
+        total: ordens.filter((o) => (o.etapa || 'Aguardando') === etapa).length,
+      }))
+      .sort((a, b) => b.total - a.total)[0];
+
+    return {
+      total,
+      atrasadas,
+      urgentes,
+      finalizadas,
+      gargalo: gargalo?.etapa || '—',
+      gargaloTotal: gargalo?.total || 0,
+    };
+  }, [ordens]);
 
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+        {error}
       </div>
     );
   }
@@ -422,31 +206,31 @@ export default function ProducaoPage() {
         <div className="erp-card p-5">
           <div className="mb-3 flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Aguardando material
+              Ordens
             </p>
-            <ShieldAlert className="h-4 w-4 text-amber-500" />
+            <Layers3 className="h-4 w-4 text-sky-500" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">{stats.aguardando}</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.total}</p>
         </div>
 
         <div className="erp-card p-5">
           <div className="mb-3 flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Prontas
+              Atrasadas
             </p>
-            <Boxes className="h-4 w-4 text-sky-500" />
+            <AlertTriangle className="h-4 w-4 text-red-500" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">{stats.prontas}</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.atrasadas}</p>
         </div>
 
         <div className="erp-card p-5">
           <div className="mb-3 flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Em produção
+              Urgentes
             </p>
-            <Factory className="h-4 w-4 text-violet-500" />
+            <Flag className="h-4 w-4 text-amber-500" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">{stats.producao}</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.urgentes}</p>
         </div>
 
         <div className="erp-card p-5">
@@ -454,234 +238,171 @@ export default function ProducaoPage() {
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Finalizadas
             </p>
-            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+            <PackageCheck className="h-4 w-4 text-emerald-500" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">{stats.finalizadas}</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.finalizadas}</p>
         </div>
 
         <div className="erp-card p-5">
           <div className="mb-3 flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Custo total
+              Gargalo
             </p>
-            <CircleDollarSign className="h-4 w-4 text-cyan-500" />
+            <Factory className="h-4 w-4 text-violet-500" />
           </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">{fmt(stats.custoTotal)}</p>
+          <p className="text-base font-bold text-slate-900 dark:text-white">{resumo.gargalo}</p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            {resumo.gargaloTotal} ordem(ns)
+          </p>
         </div>
       </section>
 
-      <section className="erp-card overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-slate-200/70 px-5 py-4 dark:border-slate-800 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar OP, pedido, cliente ou produto..."
-                className="erp-input w-80 pl-10"
-              />
-            </div>
+      <section className="overflow-x-auto pb-4">
+        <div className="flex min-w-max gap-4">
+          {ETAPAS.map((etapa) => {
+            const lista = ordens.filter((o) => (o.etapa || 'Aguardando') === etapa);
 
-            {(['Todos', 'Aguardando material', 'Pronta para produção', 'Em produção', 'Pausada', 'Finalizada'] as const).map((status) => (
-              <button
-                key={status}
-                onClick={() => setStatusFiltro(status)}
-                className={`rounded-2xl px-3 py-2 text-xs font-semibold transition ${
-                  statusFiltro === status
-                    ? 'bg-sky-500 text-white'
-                    : 'border border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-sky-500/30 dark:hover:text-sky-400'
-                }`}
+            return (
+              <div
+                key={etapa}
+                className="w-[320px] shrink-0 rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900"
               >
-                {status}
-              </button>
-            ))}
-          </div>
+                <div className={`border-b px-4 py-4 ${etapaHeaderClasse(etapa)}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                        {etapa}
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        {lista.length} ordem(ns)
+                      </p>
+                    </div>
 
-          <button className="erp-button-primary">
-            <Layers3 className="mr-2 h-4 w-4" />
-            Produção ativa
-          </button>
+                    <span className="inline-flex h-8 min-w-8 items-center justify-center rounded-full bg-slate-100 px-2 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                      {lista.length}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-3 p-4">
+                  {lista.length > 0 ? (
+                    lista.map((ordem) => {
+                      const prioridade = getPrioridade(ordem);
+                      const atrasado = isAtrasado(ordem);
+
+                      return (
+                        <div
+                          key={ordem.id}
+                          className={`rounded-2xl border p-4 shadow-sm transition ${
+                            atrasado
+                              ? 'border-red-200 bg-red-50/50 dark:border-red-500/20 dark:bg-red-500/5'
+                              : 'border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-950/60'
+                          }`}
+                        >
+                          <div className="mb-3 flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                                {ordem.pedido_numero || 'Sem pedido'}
+                              </p>
+                              <h3 className="mt-1 text-base font-bold text-slate-900 dark:text-white">
+                                {getProdutoNome(ordem)}
+                              </h3>
+                              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                {ordem.cliente_nome || 'Sem cliente'}
+                              </p>
+                            </div>
+
+                            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${prioridadeClasse(prioridade)}`}>
+                              {prioridade}
+                            </span>
+                          </div>
+
+                          <div className="grid gap-3">
+                            <div className="rounded-2xl bg-white p-3 dark:bg-slate-900">
+                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                                Quantidade
+                              </p>
+                              <p className="mt-1 font-semibold text-slate-900 dark:text-white">
+                                {Number(ordem.quantidade || 0).toLocaleString('pt-BR')}
+                              </p>
+                            </div>
+
+                            <div className="rounded-2xl bg-white p-3 dark:bg-slate-900">
+                              <div className="flex items-center gap-2">
+                                <CalendarDays className="h-4 w-4 text-sky-500" />
+                                <p className="text-xs text-slate-500 dark:text-slate-400">
+                                  Prazo
+                                </p>
+                              </div>
+                              <p className={`mt-1 font-semibold ${atrasado ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-white'}`}>
+                                {ordem.prazo
+                                  ? new Date(`${ordem.prazo}T00:00:00`).toLocaleDateString('pt-BR')
+                                  : 'Não informado'}
+                              </p>
+                            </div>
+
+                            {atrasado && (
+                              <div className="rounded-2xl border border-red-200 bg-red-50 p-3 dark:border-red-500/20 dark:bg-red-500/10">
+                                <div className="flex items-center gap-2">
+                                  <Clock3 className="h-4 w-4 text-red-500" />
+                                  <p className="text-sm font-semibold text-red-700 dark:text-red-300">
+                                    Ordem atrasada
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="mt-4 space-y-3">
+                            <div>
+                              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                                Prioridade
+                              </label>
+                              <select
+                                value={prioridade}
+                                onChange={(e) => atualizarPrioridade(ordem.id, e.target.value)}
+                                className="erp-input w-full"
+                              >
+                                {PRIORIDADES.map((item) => (
+                                  <option key={item}>{item}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                                Mover etapa
+                              </label>
+                              <div className="flex items-center gap-2">
+                                <select
+                                  value={ordem.etapa || 'Aguardando'}
+                                  onChange={(e) => mover(ordem.id, e.target.value)}
+                                  className="erp-input w-full"
+                                >
+                                  {ETAPAS.map((item) => (
+                                    <option key={item}>{item}</option>
+                                  ))}
+                                </select>
+
+                                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                                  <ChevronRight className="h-4 w-4" />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                      Sem ordens nesta etapa.
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
-
-        {error ? (
-          <div className="p-6 text-sm text-red-600 dark:text-red-400">
-            Erro ao carregar produção: {error}
-          </div>
-        ) : (
-          <div className="grid gap-4 p-5 lg:grid-cols-2">
-            {filtered.map((op) => (
-              <div key={op.id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                      {op.pedido_numero}
-                    </p>
-                    <h3 className="mt-1 text-lg font-bold text-slate-900 dark:text-white">
-                      {op.produto || 'Sem produto'}
-                    </h3>
-                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                      {op.cliente_nome || 'Sem cliente'}
-                    </p>
-                  </div>
-
-                  <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusConfig[op.status]}`}>
-                    {op.status}
-                  </span>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-4">
-                  <div className="rounded-2xl bg-slate-50 p-3 dark:bg-slate-950">
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Quantidade</p>
-                    <p className="mt-1 text-base font-semibold text-slate-900 dark:text-white">
-                      {Number(op.quantidade || 0).toLocaleString('pt-BR')}
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl bg-slate-50 p-3 dark:bg-slate-950">
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Prazo</p>
-                    <p className="mt-1 text-base font-semibold text-slate-900 dark:text-white">
-                      {op.prazo ? new Date(`${op.prazo}T00:00:00`).toLocaleDateString('pt-BR') : '—'}
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl bg-slate-50 p-3 dark:bg-slate-950">
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Custo total</p>
-                    <p className="mt-1 text-base font-semibold text-slate-900 dark:text-white">
-                      {fmt(Number(op.costBreakdown.total || 0))}
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl bg-slate-50 p-3 dark:bg-slate-950">
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Custo unit.</p>
-                    <p className="mt-1 text-base font-semibold text-slate-900 dark:text-white">
-                      {Number(op.quantidade || 0) > 0
-                        ? fmt(Number(op.costBreakdown.total || 0) / Number(op.quantidade || 0))
-                        : fmt(0)}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/70">
-                    <div className="flex items-center gap-2">
-                      <Package className="h-4 w-4 text-sky-500" />
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                        Matéria-prima
-                      </p>
-                    </div>
-                    <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">
-                      {fmt(op.costBreakdown.material)}
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/70">
-                    <div className="flex items-center gap-2">
-                      <Printer className="h-4 w-4 text-violet-500" />
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                        Impressão
-                      </p>
-                    </div>
-                    <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">
-                      {fmt(op.costBreakdown.impressao)}
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/70">
-                    <div className="flex items-center gap-2">
-                      <Scissors className="h-4 w-4 text-amber-500" />
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                        Acabamento
-                      </p>
-                    </div>
-                    <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">
-                      {fmt(op.costBreakdown.acabamento)}
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/70">
-                    <div className="flex items-center gap-2">
-                      <Cog className="h-4 w-4 text-emerald-500" />
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                        Operacional
-                      </p>
-                    </div>
-                    <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">
-                      {fmt(op.costBreakdown.operacional)}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <div className="mb-2 flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400">
-                    <span>Progresso</span>
-                    <span>{Number(op.progresso || 0)}%</span>
-                  </div>
-
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-sky-500 to-cyan-500 transition-all"
-                      style={{ width: `${Number(op.progresso || 0)}%` }}
-                    />
-                  </div>
-                </div>
-
-                <div className="mt-4 rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/70">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                    Materiais
-                  </p>
-                  <p className={`mt-2 text-sm font-medium ${op.materiais_ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                    {op.materiais_ok ? 'Estoque validado e liberado para produção' : 'Validação de materiais pendente'}
-                  </p>
-                </div>
-
-                <div className="mt-4 rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/70">
-                  <div className="flex items-center gap-2">
-                    <TrendingUp className="h-4 w-4 text-sky-500" />
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                      Gestão
-                    </p>
-                  </div>
-                  <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                    Agora a ordem separa custo de matéria-prima, impressão, acabamento e operacional.
-                  </p>
-                </div>
-
-                <div className="mt-5 flex flex-wrap gap-2">
-                  <button
-                    onClick={() => iniciarProducao(op)}
-                    className="erp-button-primary px-3 py-2 text-xs"
-                  >
-                    <PlayCircle className="mr-1.5 h-4 w-4" />
-                    Iniciar
-                  </button>
-
-                  <button
-                    onClick={() => updateStatus(op, 'Pausada')}
-                    className="erp-button-secondary px-3 py-2 text-xs"
-                  >
-                    <PauseCircle className="mr-1.5 h-4 w-4" />
-                    Pausar
-                  </button>
-
-                  <button
-                    onClick={() => updateStatus(op, 'Finalizada', 100)}
-                    className="inline-flex items-center justify-center rounded-2xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-600"
-                  >
-                    <CheckCircle2 className="mr-1.5 h-4 w-4" />
-                    Finalizar
-                  </button>
-                </div>
-              </div>
-            ))}
-
-            {filtered.length === 0 && (
-              <div className="col-span-full rounded-3xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                Nenhuma ordem de produção encontrada.
-              </div>
-            )}
-          </div>
-        )}
       </section>
     </div>
   );
