@@ -11,6 +11,7 @@ import {
   Factory,
   PackageCheck,
   CircleAlert,
+  Workflow,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
@@ -25,6 +26,12 @@ type PedidoRow = {
   prazo?: string | null;
   observacoes?: string | null;
   created_at?: string | null;
+};
+
+type OrdemProducaoRow = {
+  id: string;
+  pedido_id?: string | null;
+  pedido_numero?: string | null;
 };
 
 const statusStyles: Record<string, string> = {
@@ -58,24 +65,28 @@ function getStatus(pedido: PedidoRow) {
 
 export default function PedidosPage() {
   const [pedidos, setPedidos] = useState<PedidoRow[]>([]);
+  const [ordens, setOrdens] = useState<OrdemProducaoRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedPedido, setSelectedPedido] = useState<PedidoRow | null>(null);
   const [error, setError] = useState('');
+  const [gerandoOpId, setGerandoOpId] = useState<string | null>(null);
 
   async function fetchPedidos() {
     try {
       setLoading(true);
       setError('');
 
-      const { data, error } = await supabase
-        .from('pedidos')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const [pedidosRes, ordensRes] = await Promise.all([
+        supabase.from('pedidos').select('*').order('created_at', { ascending: false }),
+        supabase.from('ordens_producao').select('id,pedido_id,pedido_numero').order('created_at', { ascending: false }),
+      ]);
 
-      if (error) throw error;
+      if (pedidosRes.error) throw pedidosRes.error;
+      if (ordensRes.error) throw ordensRes.error;
 
-      setPedidos((data as PedidoRow[]) || []);
+      setPedidos((pedidosRes.data as PedidoRow[]) || []);
+      setOrdens((ordensRes.data as OrdemProducaoRow[]) || []);
     } catch (err: any) {
       console.error('Erro ao carregar pedidos:', err);
       setError(err?.message || 'Erro ao carregar pedidos');
@@ -87,6 +98,15 @@ export default function PedidosPage() {
   useEffect(() => {
     fetchPedidos();
   }, []);
+
+  const pedidosComOp = useMemo(() => {
+    const mapa = new Set(
+      ordens
+        .map((op) => op.pedido_id)
+        .filter(Boolean)
+    );
+    return mapa;
+  }, [ordens]);
 
   const filtered = useMemo(() => {
     return pedidos.filter((pedido) => {
@@ -156,6 +176,56 @@ export default function PedidosPage() {
     } catch (err: any) {
       console.error(err);
       alert(err?.message || 'Erro ao atualizar status');
+    }
+  }
+
+  async function handleGerarProducao(pedido: PedidoRow) {
+    try {
+      if (!pedido.id) return;
+
+      if (pedidosComOp.has(pedido.id)) {
+        alert('Esse pedido já possui uma ordem de produção.');
+        return;
+      }
+
+      setGerandoOpId(pedido.id);
+
+      const payload = {
+        pedido_id: pedido.id,
+        pedido_numero: pedido.numero || 'Sem número',
+        cliente_nome: pedido.cliente_nome || '',
+        produto: pedido.produto || '',
+        quantidade: Number(pedido.quantidade || 0),
+        status: 'Pronta para produção',
+        prazo: pedido.prazo || null,
+        progresso: 0,
+        materiais_ok: false,
+        custo_previsto: Number(pedido.valor || 0) * 0.45,
+      };
+
+      const { error: insertError } = await supabase
+        .from('ordens_producao')
+        .insert(payload);
+
+      if (insertError) throw insertError;
+
+      const { error: updatePedidoError } = await supabase
+        .from('pedidos')
+        .update({
+          status: 'Em Produção',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', pedido.id);
+
+      if (updatePedidoError) throw updatePedidoError;
+
+      alert(`Produção gerada com sucesso para o pedido ${pedido.numero || ''}.`);
+      fetchPedidos();
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || 'Erro ao gerar produção');
+    } finally {
+      setGerandoOpId(null);
     }
   }
 
@@ -249,7 +319,7 @@ export default function PedidosPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-sm">
+            <table className="w-full min-w-[1180px] text-sm">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-900/60">
                   {[
@@ -259,6 +329,7 @@ export default function PedidosPage() {
                     'Qtd',
                     'Valor',
                     'Status',
+                    'Produção',
                     'Prazo',
                     'Ações',
                   ].map((h) => (
@@ -278,6 +349,8 @@ export default function PedidosPage() {
                   const statusClass =
                     statusStyles[status] ||
                     'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+
+                  const jaTemOp = pedidosComOp.has(pedido.id);
 
                   return (
                     <tr
@@ -312,6 +385,18 @@ export default function PedidosPage() {
                         </span>
                       </td>
 
+                      <td className="px-4 py-3">
+                        {jaTemOp ? (
+                          <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                            Gerada
+                          </span>
+                        ) : (
+                          <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+                            Pendente
+                          </span>
+                        )}
+                      </td>
+
                       <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
                         {pedido.prazo
                           ? new Date(`${pedido.prazo}T00:00:00`).toLocaleDateString('pt-BR')
@@ -338,6 +423,21 @@ export default function PedidosPage() {
                             title="Editar"
                           >
                             <Pencil className="h-4 w-4" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleGerarProducao(pedido)}
+                            disabled={jaTemOp || gerandoOpId === pedido.id}
+                            className={`inline-flex items-center justify-center rounded-2xl px-3 py-2 text-xs font-semibold transition ${
+                              jaTemOp || gerandoOpId === pedido.id
+                                ? 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500'
+                                : 'bg-violet-500 text-white hover:bg-violet-600'
+                            }`}
+                            title="Gerar produção"
+                          >
+                            <Workflow className="mr-1.5 h-4 w-4" />
+                            {gerandoOpId === pedido.id ? 'Gerando...' : jaTemOp ? 'Já gerada' : 'Gerar Produção'}
                           </button>
 
                           <select
@@ -372,7 +472,7 @@ export default function PedidosPage() {
                 {filtered.length === 0 && (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={9}
                       className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400"
                     >
                       Nenhum pedido encontrado.
