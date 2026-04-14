@@ -12,13 +12,18 @@ import {
   PackageCheck,
   CircleAlert,
   Workflow,
+  X,
+  Save,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 type PedidoRow = {
   id: string;
   numero?: string | null;
+  cliente_id?: string | null;
   cliente_nome?: string | null;
+  orcamento_id?: string | null;
+  orcamento_numero?: string | null;
   produto?: string | null;
   quantidade?: number | null;
   valor?: number | null;
@@ -26,6 +31,7 @@ type PedidoRow = {
   prazo?: string | null;
   observacoes?: string | null;
   created_at?: string | null;
+  updated_at?: string | null;
 };
 
 type OrdemProducaoRow = {
@@ -34,14 +40,35 @@ type OrdemProducaoRow = {
   pedido_numero?: string | null;
 };
 
+type PedidoFormData = {
+  cliente_nome: string;
+  produto: string;
+  quantidade: string;
+  valor: string;
+  prazo: string;
+  observacoes: string;
+  status: string;
+};
+
 const statusStyles: Record<string, string> = {
   Aguardando: 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
   'Em Andamento': 'bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300',
   'Em Produção': 'bg-violet-100 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300',
+  'Em Acabamento': 'bg-cyan-100 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300',
   Pronto: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
   Entregue: 'bg-teal-100 text-teal-700 dark:bg-teal-500/10 dark:text-teal-300',
   Cancelado: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
   Atrasado: 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300',
+};
+
+const initialForm: PedidoFormData = {
+  cliente_nome: '',
+  produto: '',
+  quantidade: '',
+  valor: '',
+  prazo: '',
+  observacoes: '',
+  status: 'Aguardando',
 };
 
 function formatCurrency(value: number) {
@@ -63,6 +90,15 @@ function getStatus(pedido: PedidoRow) {
   return status;
 }
 
+function nextPedidoNumero(pedidos: PedidoRow[]) {
+  const numeros = pedidos
+    .map((p) => Number(String(p.numero || '').replace(/\D/g, '')))
+    .filter((n) => !Number.isNaN(n) && n > 0);
+
+  const max = numeros.length ? Math.max(...numeros) : 1042;
+  return `P-${String(max + 1).padStart(4, '0')}`;
+}
+
 export default function PedidosPage() {
   const [pedidos, setPedidos] = useState<PedidoRow[]>([]);
   const [ordens, setOrdens] = useState<OrdemProducaoRow[]>([]);
@@ -71,6 +107,11 @@ export default function PedidosPage() {
   const [selectedPedido, setSelectedPedido] = useState<PedidoRow | null>(null);
   const [error, setError] = useState('');
   const [gerandoOpId, setGerandoOpId] = useState<string | null>(null);
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editingPedido, setEditingPedido] = useState<PedidoRow | null>(null);
+  const [form, setForm] = useState<PedidoFormData>(initialForm);
 
   async function fetchPedidos() {
     try {
@@ -100,12 +141,7 @@ export default function PedidosPage() {
   }, []);
 
   const pedidosComOp = useMemo(() => {
-    const mapa = new Set(
-      ordens
-        .map((op) => op.pedido_id)
-        .filter(Boolean)
-    );
-    return mapa;
+    return new Set(ordens.map((op) => op.pedido_id).filter(Boolean));
   }, [ordens]);
 
   const filtered = useMemo(() => {
@@ -146,6 +182,108 @@ export default function PedidosPage() {
       valorAberto,
     };
   }, [pedidos]);
+
+  function openNewForm() {
+    setEditingPedido(null);
+    setForm(initialForm);
+    setFormOpen(true);
+  }
+
+  function openEditForm(pedido: PedidoRow) {
+    setEditingPedido(pedido);
+    setForm({
+      cliente_nome: pedido.cliente_nome || '',
+      produto: pedido.produto || '',
+      quantidade: String(pedido.quantidade ?? ''),
+      valor: String(pedido.valor ?? ''),
+      prazo: pedido.prazo || '',
+      observacoes: pedido.observacoes || '',
+      status: pedido.status || 'Aguardando',
+    });
+    setFormOpen(true);
+  }
+
+  function closeForm() {
+    setFormOpen(false);
+    setEditingPedido(null);
+    setForm(initialForm);
+  }
+
+  function updateForm<K extends keyof PedidoFormData>(field: K, value: PedidoFormData[K]) {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  async function handleSavePedido() {
+    try {
+      if (!form.cliente_nome.trim()) {
+        alert('Informe o cliente.');
+        return;
+      }
+
+      if (!form.produto.trim()) {
+        alert('Informe o produto.');
+        return;
+      }
+
+      if (!form.quantidade || Number(form.quantidade) <= 0) {
+        alert('Informe uma quantidade válida.');
+        return;
+      }
+
+      if (!form.valor || Number(form.valor) <= 0) {
+        alert('Informe um valor válido.');
+        return;
+      }
+
+      setSaving(true);
+
+      if (editingPedido?.id) {
+        const { error } = await supabase
+          .from('pedidos')
+          .update({
+            cliente_nome: form.cliente_nome.trim(),
+            produto: form.produto.trim(),
+            quantidade: Number(form.quantidade),
+            valor: Number(form.valor),
+            prazo: form.prazo || null,
+            observacoes: form.observacoes.trim(),
+            status: form.status,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', editingPedido.id);
+
+        if (error) throw error;
+      } else {
+        const numero = nextPedidoNumero(pedidos);
+
+        const { error } = await supabase.from('pedidos').insert({
+          numero,
+          cliente_id: null,
+          cliente_nome: form.cliente_nome.trim(),
+          orcamento_id: null,
+          orcamento_numero: null,
+          produto: form.produto.trim(),
+          quantidade: Number(form.quantidade),
+          valor: Number(form.valor),
+          status: form.status,
+          prazo: form.prazo || null,
+          observacoes: form.observacoes.trim(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+
+        if (error) throw error;
+      }
+
+      closeForm();
+      fetchPedidos();
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || 'Erro ao salvar pedido');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function handleDelete(id: string) {
     const confirmar = window.confirm('Deseja realmente excluir este pedido?');
@@ -201,6 +339,8 @@ export default function PedidosPage() {
         progresso: 0,
         materiais_ok: false,
         custo_previsto: Number(pedido.valor || 0) * 0.45,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       };
 
       const { error: insertError } = await supabase
@@ -304,9 +444,7 @@ export default function PedidosPage() {
           <button
             type="button"
             className="erp-button-primary"
-            onClick={() =>
-              alert('Na próxima etapa eu adiciono o formulário premium de novo pedido.')
-            }
+            onClick={openNewForm}
           >
             <Plus className="mr-2 h-4 w-4" />
             Novo Pedido
@@ -416,9 +554,7 @@ export default function PedidosPage() {
 
                           <button
                             type="button"
-                            onClick={() =>
-                              alert('Na próxima etapa eu adiciono a edição premium do pedido.')
-                            }
+                            onClick={() => openEditForm(pedido)}
                             className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-sky-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-sky-400"
                             title="Editar"
                           >
@@ -450,6 +586,7 @@ export default function PedidosPage() {
                             <option>Aguardando</option>
                             <option>Em Andamento</option>
                             <option>Em Produção</option>
+                            <option>Em Acabamento</option>
                             <option>Pronto</option>
                             <option>Entregue</option>
                             <option>Cancelado</option>
@@ -551,6 +688,151 @@ export default function PedidosPage() {
               <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200">
                 {selectedPedido.observacoes?.trim() || 'Sem observações cadastradas.'}
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {formOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeForm} />
+          <div className="relative z-10 w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+                  {editingPedido ? 'Editar pedido' : 'Novo pedido'}
+                </p>
+                <h3 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">
+                  {editingPedido ? editingPedido.numero || 'Pedido' : 'Cadastro de Pedido'}
+                </h3>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeForm}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition hover:text-red-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                  Cliente
+                </label>
+                <input
+                  value={form.cliente_nome}
+                  onChange={(e) => updateForm('cliente_nome', e.target.value)}
+                  placeholder="Digite o nome do cliente"
+                  className="erp-input w-full"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                  Produto
+                </label>
+                <input
+                  value={form.produto}
+                  onChange={(e) => updateForm('produto', e.target.value)}
+                  placeholder="Digite o nome do produto"
+                  className="erp-input w-full"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                  Quantidade
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={form.quantidade}
+                  onChange={(e) => updateForm('quantidade', e.target.value)}
+                  placeholder="0"
+                  className="erp-input w-full"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                  Valor
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.valor}
+                  onChange={(e) => updateForm('valor', e.target.value)}
+                  placeholder="0.00"
+                  className="erp-input w-full"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                  Prazo
+                </label>
+                <input
+                  type="date"
+                  value={form.prazo}
+                  onChange={(e) => updateForm('prazo', e.target.value)}
+                  className="erp-input w-full"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                  Status
+                </label>
+                <select
+                  value={form.status}
+                  onChange={(e) => updateForm('status', e.target.value)}
+                  className="erp-input w-full"
+                >
+                  <option>Aguardando</option>
+                  <option>Em Andamento</option>
+                  <option>Em Produção</option>
+                  <option>Em Acabamento</option>
+                  <option>Pronto</option>
+                  <option>Entregue</option>
+                  <option>Cancelado</option>
+                </select>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                  Observações
+                </label>
+                <textarea
+                  value={form.observacoes}
+                  onChange={(e) => updateForm('observacoes', e.target.value)}
+                  placeholder="Observações do pedido"
+                  rows={4}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:ring-4 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-sky-500 dark:focus:ring-sky-500/10"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeForm}
+                className="erp-button-secondary"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSavePedido}
+                disabled={saving}
+                className={`erp-button-primary ${saving ? 'cursor-not-allowed opacity-70' : ''}`}
+              >
+                <Save className="mr-2 h-4 w-4" />
+                {saving ? 'Salvando...' : editingPedido ? 'Salvar Alterações' : 'Criar Pedido'}
+              </button>
             </div>
           </div>
         </div>
