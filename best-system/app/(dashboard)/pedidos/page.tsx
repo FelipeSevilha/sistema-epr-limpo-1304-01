@@ -14,7 +14,6 @@ import {
   Workflow,
   X,
   Save,
-  TrendingUp,
   CircleDollarSign,
   Printer,
   Scissors,
@@ -396,6 +395,7 @@ export default function PedidosPage() {
   function openNewForm() {
     setEditingPedido(null);
     setForm(initialForm);
+    setMargemAlvo(30);
     setFormOpen(true);
   }
 
@@ -410,6 +410,7 @@ export default function PedidosPage() {
       observacoes: pedido.observacoes || '',
       status: pedido.status || 'Aguardando',
     });
+    setMargemAlvo(30);
     setFormOpen(true);
   }
 
@@ -417,6 +418,7 @@ export default function PedidosPage() {
     setFormOpen(false);
     setEditingPedido(null);
     setForm(initialForm);
+    setMargemAlvo(30);
   }
 
   function updateForm<K extends keyof PedidoFormData>(field: K, value: PedidoFormData[K]) {
@@ -592,74 +594,53 @@ export default function PedidosPage() {
 
   return (
     <div className="space-y-6">
-      <section className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4 flex-1">
-          <div className="erp-card p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Pedidos ativos
-              </p>
-              <Clock3 className="h-4 w-4 text-sky-500" />
-            </div>
-            <p className="text-3xl font-bold text-slate-900 dark:text-white">
-              {stats.ativos}
+      <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Pedidos ativos
             </p>
+            <Clock3 className="h-4 w-4 text-sky-500" />
           </div>
-
-          <div className="erp-card p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Em produção
-              </p>
-              <Factory className="h-4 w-4 text-violet-500" />
-            </div>
-            <p className="text-3xl font-bold text-slate-900 dark:text-white">
-              {stats.producao}
-            </p>
-          </div>
-
-          <div className="erp-card p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Prontos / entregues
-              </p>
-              <PackageCheck className="h-4 w-4 text-emerald-500" />
-            </div>
-            <p className="text-3xl font-bold text-slate-900 dark:text-white">
-              {stats.prontos}
-            </p>
-          </div>
-
-          <div className="erp-card p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Valor em aberto
-              </p>
-              <CircleAlert className="h-4 w-4 text-cyan-500" />
-            </div>
-            <p className="text-2xl font-bold text-slate-900 dark:text-white">
-              {fmt(stats.valorAberto)}
-            </p>
-          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">
+            {stats.ativos}
+          </p>
         </div>
 
-        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-          <Target className="h-4 w-4 text-violet-500" />
-          <span className="text-sm font-medium text-slate-600 dark:text-slate-300">
-            Margem alvo
-          </span>
-          <select
-            value={margemAlvo}
-            onChange={(e) => setMargemAlvo(Number(e.target.value))}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
-          >
-            <option value={20}>20%</option>
-            <option value={25}>25%</option>
-            <option value={30}>30%</option>
-            <option value={35}>35%</option>
-            <option value={40}>40%</option>
-            <option value={45}>45%</option>
-          </select>
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Em produção
+            </p>
+            <Factory className="h-4 w-4 text-violet-500" />
+          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">
+            {stats.producao}
+          </p>
+        </div>
+
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Prontos / entregues
+            </p>
+            <PackageCheck className="h-4 w-4 text-emerald-500" />
+          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">
+            {stats.prontos}
+          </p>
+        </div>
+
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Valor em aberto
+            </p>
+            <CircleAlert className="h-4 w-4 text-cyan-500" />
+          </div>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
+            {fmt(stats.valorAberto)}
+          </p>
         </div>
       </section>
 
@@ -1249,12 +1230,11 @@ export default function PedidosPage() {
                       onChange={(e) => setMargemAlvo(Number(e.target.value))}
                       className="rounded-xl border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                     >
-                      <option value={20}>20%</option>
-                      <option value={25}>25%</option>
-                      <option value={30}>30%</option>
-                      <option value={35}>35%</option>
-                      <option value={40}>40%</option>
-                      <option value={45}>45%</option>
+                      {Array.from({ length: 21 }, (_, i) => i * 5).map((value) => (
+                        <option key={value} value={value}>
+                          {value}%
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
