@@ -14,6 +14,8 @@ import {
   Workflow,
   X,
   Save,
+  TrendingUp,
+  CircleDollarSign,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
@@ -38,6 +40,7 @@ type OrdemProducaoRow = {
   id: string;
   pedido_id?: string | null;
   pedido_numero?: string | null;
+  custo_previsto?: number | null;
 };
 
 type PedidoFormData = {
@@ -120,7 +123,7 @@ export default function PedidosPage() {
 
       const [pedidosRes, ordensRes] = await Promise.all([
         supabase.from('pedidos').select('*').order('created_at', { ascending: false }),
-        supabase.from('ordens_producao').select('id,pedido_id,pedido_numero').order('created_at', { ascending: false }),
+        supabase.from('ordens_producao').select('id,pedido_id,pedido_numero,custo_previsto').order('created_at', { ascending: false }),
       ]);
 
       if (pedidosRes.error) throw pedidosRes.error;
@@ -139,6 +142,16 @@ export default function PedidosPage() {
   useEffect(() => {
     fetchPedidos();
   }, []);
+
+  const ordensMap = useMemo(() => {
+    const map = new Map<string, OrdemProducaoRow>();
+    ordens.forEach((op) => {
+      if (op.pedido_id) {
+        map.set(op.pedido_id, op);
+      }
+    });
+    return map;
+  }, [ordens]);
 
   const pedidosComOp = useMemo(() => {
     return new Set(ordens.map((op) => op.pedido_id).filter(Boolean));
@@ -338,7 +351,7 @@ export default function PedidosPage() {
         prazo: pedido.prazo || null,
         progresso: 0,
         materiais_ok: false,
-        custo_previsto: Number(pedido.valor || 0) * 0.45,
+        custo_previsto: 0,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -457,7 +470,7 @@ export default function PedidosPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1180px] text-sm">
+            <table className="w-full min-w-[1450px] text-sm">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-900/60">
                   {[
@@ -465,7 +478,10 @@ export default function PedidosPage() {
                     'Cliente',
                     'Produto',
                     'Qtd',
-                    'Valor',
+                    'Valor Venda',
+                    'Custo Previsto',
+                    'Lucro Bruto',
+                    'Margem',
                     'Status',
                     'Produção',
                     'Prazo',
@@ -489,6 +505,11 @@ export default function PedidosPage() {
                     'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
 
                   const jaTemOp = pedidosComOp.has(pedido.id);
+                  const ordem = pedido.id ? ordensMap.get(pedido.id) : undefined;
+                  const custoPrevisto = Number(ordem?.custo_previsto || 0);
+                  const valorVenda = Number(pedido.valor || 0);
+                  const lucroBruto = valorVenda - custoPrevisto;
+                  const margem = valorVenda > 0 ? (lucroBruto / valorVenda) * 100 : 0;
 
                   return (
                     <tr
@@ -512,7 +533,43 @@ export default function PedidosPage() {
                       </td>
 
                       <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
-                        {formatCurrency(Number(pedido.valor || 0))}
+                        {formatCurrency(valorVenda)}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        {jaTemOp ? (
+                          <span className="font-semibold text-slate-900 dark:text-white">
+                            {formatCurrency(custoPrevisto)}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 dark:text-slate-500">—</span>
+                        )}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        {jaTemOp ? (
+                          <span className={`font-semibold ${lucroBruto >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                            {formatCurrency(lucroBruto)}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 dark:text-slate-500">—</span>
+                        )}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        {jaTemOp ? (
+                          <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            margem >= 25
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                              : margem >= 10
+                              ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
+                              : 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300'
+                          }`}>
+                            {margem.toFixed(1)}%
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 dark:text-slate-500">—</span>
+                        )}
                       </td>
 
                       <td className="px-4 py-3">
@@ -609,7 +666,7 @@ export default function PedidosPage() {
                 {filtered.length === 0 && (
                   <tr>
                     <td
-                      colSpan={9}
+                      colSpan={12}
                       className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400"
                     >
                       Nenhum pedido encontrado.
@@ -628,7 +685,7 @@ export default function PedidosPage() {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => setSelectedPedido(null)}
           />
-          <div className="relative z-10 w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+          <div className="relative z-10 w-full max-w-3xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
@@ -651,44 +708,107 @@ export default function PedidosPage() {
               </button>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="erp-card p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Produto
-                </p>
-                <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
-                  {selectedPedido.produto || '—'}
-                </p>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                  Quantidade:{' '}
-                  {Number(selectedPedido.quantidade || 0).toLocaleString('pt-BR')}
-                </p>
-              </div>
+            {(() => {
+              const ordem = selectedPedido.id ? ordensMap.get(selectedPedido.id) : undefined;
+              const custoPrevisto = Number(ordem?.custo_previsto || 0);
+              const valorVenda = Number(selectedPedido.valor || 0);
+              const lucroBruto = valorVenda - custoPrevisto;
+              const margem = valorVenda > 0 ? (lucroBruto / valorVenda) * 100 : 0;
 
-              <div className="erp-card p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Financeiro
-                </p>
-                <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
-                  {formatCurrency(Number(selectedPedido.valor || 0))}
-                </p>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                  Prazo:{' '}
-                  {selectedPedido.prazo
-                    ? new Date(`${selectedPedido.prazo}T00:00:00`).toLocaleDateString('pt-BR')
-                    : 'Não informado'}
-                </p>
-              </div>
-            </div>
+              return (
+                <>
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="erp-card p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Valor de venda
+                      </p>
+                      <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
+                        {formatCurrency(valorVenda)}
+                      </p>
+                    </div>
 
-            <div className="mt-4 erp-card p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Observações
-              </p>
-              <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200">
-                {selectedPedido.observacoes?.trim() || 'Sem observações cadastradas.'}
-              </p>
-            </div>
+                    <div className="erp-card p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Custo previsto
+                      </p>
+                      <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
+                        {formatCurrency(custoPrevisto)}
+                      </p>
+                    </div>
+
+                    <div className="erp-card p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Lucro bruto
+                      </p>
+                      <p className={`mt-2 text-base font-semibold ${lucroBruto >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                        {formatCurrency(lucroBruto)}
+                      </p>
+                    </div>
+
+                    <div className="erp-card p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Margem
+                      </p>
+                      <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
+                        {margem.toFixed(1)}%
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div className="erp-card p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Produto
+                      </p>
+                      <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
+                        {selectedPedido.produto || '—'}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        Quantidade: {Number(selectedPedido.quantidade || 0).toLocaleString('pt-BR')}
+                      </p>
+                    </div>
+
+                    <div className="erp-card p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Prazo / Produção
+                      </p>
+                      <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
+                        {selectedPedido.prazo
+                          ? new Date(`${selectedPedido.prazo}T00:00:00`).toLocaleDateString('pt-BR')
+                          : 'Não informado'}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        {ordem ? 'Ordem de produção gerada' : 'Produção ainda não gerada'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 erp-card p-4">
+                    <div className="mb-2 flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4 text-sky-500" />
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Leitura gerencial
+                      </p>
+                    </div>
+                    <p className="text-sm text-slate-700 dark:text-slate-200">
+                      Esse pedido já exibe custo previsto, lucro bruto e margem estimada com base na produção vinculada.
+                    </p>
+                  </div>
+
+                  <div className="mt-4 erp-card p-4">
+                    <div className="mb-2 flex items-center gap-2">
+                      <CircleDollarSign className="h-4 w-4 text-emerald-500" />
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Observações
+                      </p>
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200">
+                      {selectedPedido.observacoes?.trim() || 'Sem observações cadastradas.'}
+                    </p>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
