@@ -20,6 +20,8 @@ import {
   Scissors,
   Package,
   Cog,
+  Target,
+  BadgeDollarSign,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
@@ -107,12 +109,11 @@ const initialForm: PedidoFormData = {
   status: 'Aguardando',
 };
 
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat('pt-BR', {
+const fmt = (v: number) =>
+  new Intl.NumberFormat('pt-BR', {
     style: 'currency',
     currency: 'BRL',
-  }).format(value || 0);
-}
+  }).format(v || 0);
 
 function getStatus(pedido: PedidoRow) {
   if (!pedido.prazo) return pedido.status || 'Aguardando';
@@ -235,6 +236,13 @@ function buildCostBreakdown(
   };
 }
 
+function calculateSuggestedPrice(custo: number, margemAlvo: number) {
+  if (custo <= 0) return 0;
+  const divisor = 1 - margemAlvo / 100;
+  if (divisor <= 0) return custo;
+  return Number((custo / divisor).toFixed(2));
+}
+
 export default function PedidosPage() {
   const [pedidos, setPedidos] = useState<PedidoRow[]>([]);
   const [ordens, setOrdens] = useState<OrdemProducaoRow[]>([]);
@@ -250,6 +258,7 @@ export default function PedidosPage() {
   const [saving, setSaving] = useState(false);
   const [editingPedido, setEditingPedido] = useState<PedidoRow | null>(null);
   const [form, setForm] = useState<PedidoFormData>(initialForm);
+  const [margemAlvo, setMargemAlvo] = useState(30);
 
   async function fetchPedidos() {
     try {
@@ -355,6 +364,31 @@ export default function PedidosPage() {
       valorAberto,
     };
   }, [pedidos]);
+
+  const previewBreakdown = useMemo(() => {
+    if (!form.produto.trim() || !form.quantidade || Number(form.quantidade) <= 0) {
+      return null;
+    }
+
+    return buildCostBreakdown(
+      form.produto,
+      Number(form.quantidade),
+      ficha,
+      estoque
+    );
+  }, [form.produto, form.quantidade, ficha, estoque]);
+
+  const precoSugeridoPreview = useMemo(() => {
+    if (!previewBreakdown) return 0;
+    return calculateSuggestedPrice(Number(previewBreakdown.total || 0), margemAlvo);
+  }, [previewBreakdown, margemAlvo]);
+
+  const margemPreview = useMemo(() => {
+    const valor = Number(form.valor || 0);
+    const custo = Number(previewBreakdown?.total || 0);
+    if (valor <= 0) return 0;
+    return Number((((valor - custo) / valor) * 100).toFixed(2));
+  }, [form.valor, previewBreakdown]);
 
   function openNewForm() {
     setEditingPedido(null);
@@ -552,53 +586,74 @@ export default function PedidosPage() {
 
   return (
     <div className="space-y-6">
-      <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-        <div className="erp-card p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Pedidos ativos
+      <section className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4 flex-1">
+          <div className="erp-card p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Pedidos ativos
+              </p>
+              <Clock3 className="h-4 w-4 text-sky-500" />
+            </div>
+            <p className="text-3xl font-bold text-slate-900 dark:text-white">
+              {stats.ativos}
             </p>
-            <Clock3 className="h-4 w-4 text-sky-500" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">
-            {stats.ativos}
-          </p>
+
+          <div className="erp-card p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Em produção
+              </p>
+              <Factory className="h-4 w-4 text-violet-500" />
+            </div>
+            <p className="text-3xl font-bold text-slate-900 dark:text-white">
+              {stats.producao}
+            </p>
+          </div>
+
+          <div className="erp-card p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Prontos / entregues
+              </p>
+              <PackageCheck className="h-4 w-4 text-emerald-500" />
+            </div>
+            <p className="text-3xl font-bold text-slate-900 dark:text-white">
+              {stats.prontos}
+            </p>
+          </div>
+
+          <div className="erp-card p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Valor em aberto
+              </p>
+              <CircleAlert className="h-4 w-4 text-cyan-500" />
+            </div>
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">
+              {fmt(stats.valorAberto)}
+            </p>
+          </div>
         </div>
 
-        <div className="erp-card p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Em produção
-            </p>
-            <Factory className="h-4 w-4 text-violet-500" />
-          </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">
-            {stats.producao}
-          </p>
-        </div>
-
-        <div className="erp-card p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Prontos / entregues
-            </p>
-            <PackageCheck className="h-4 w-4 text-emerald-500" />
-          </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">
-            {stats.prontos}
-          </p>
-        </div>
-
-        <div className="erp-card p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Valor em aberto
-            </p>
-            <CircleAlert className="h-4 w-4 text-cyan-500" />
-          </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">
-            {formatCurrency(stats.valorAberto)}
-          </p>
+        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+          <Target className="h-4 w-4 text-violet-500" />
+          <span className="text-sm font-medium text-slate-600 dark:text-slate-300">
+            Margem alvo
+          </span>
+          <select
+            value={margemAlvo}
+            onChange={(e) => setMargemAlvo(Number(e.target.value))}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+          >
+            <option value={20}>20%</option>
+            <option value={25}>25%</option>
+            <option value={30}>30%</option>
+            <option value={35}>35%</option>
+            <option value={40}>40%</option>
+            <option value={45}>45%</option>
+          </select>
         </div>
       </section>
 
@@ -630,7 +685,7 @@ export default function PedidosPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1650px] text-sm">
+            <table className="w-full min-w-[1750px] text-sm">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-900/60">
                   {[
@@ -639,6 +694,7 @@ export default function PedidosPage() {
                     'Produto',
                     'Qtd',
                     'Venda',
+                    'Preço Sugerido',
                     'Matéria-prima',
                     'Impressão',
                     'Acabamento',
@@ -678,6 +734,7 @@ export default function PedidosPage() {
                   const custoTotal = Number(breakdown?.total || 0);
 
                   const valorVenda = Number(pedido.valor || 0);
+                  const precoSugerido = calculateSuggestedPrice(custoTotal, margemAlvo);
                   const lucroBruto = valorVenda - custoTotal;
                   const margem = valorVenda > 0 ? (lucroBruto / valorVenda) * 100 : 0;
 
@@ -703,33 +760,37 @@ export default function PedidosPage() {
                       </td>
 
                       <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
-                        {formatCurrency(valorVenda)}
-                      </td>
-
-                      <td className="px-4 py-3 text-slate-900 dark:text-white">
-                        {jaTemOp ? formatCurrency(material) : '—'}
-                      </td>
-
-                      <td className="px-4 py-3 text-slate-900 dark:text-white">
-                        {jaTemOp ? formatCurrency(impressao) : '—'}
-                      </td>
-
-                      <td className="px-4 py-3 text-slate-900 dark:text-white">
-                        {jaTemOp ? formatCurrency(acabamento) : '—'}
-                      </td>
-
-                      <td className="px-4 py-3 text-slate-900 dark:text-white">
-                        {jaTemOp ? formatCurrency(operacional) : '—'}
+                        {fmt(valorVenda)}
                       </td>
 
                       <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
-                        {jaTemOp ? formatCurrency(custoTotal) : '—'}
+                        {jaTemOp ? fmt(precoSugerido) : '—'}
+                      </td>
+
+                      <td className="px-4 py-3 text-slate-900 dark:text-white">
+                        {jaTemOp ? fmt(material) : '—'}
+                      </td>
+
+                      <td className="px-4 py-3 text-slate-900 dark:text-white">
+                        {jaTemOp ? fmt(impressao) : '—'}
+                      </td>
+
+                      <td className="px-4 py-3 text-slate-900 dark:text-white">
+                        {jaTemOp ? fmt(acabamento) : '—'}
+                      </td>
+
+                      <td className="px-4 py-3 text-slate-900 dark:text-white">
+                        {jaTemOp ? fmt(operacional) : '—'}
+                      </td>
+
+                      <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
+                        {jaTemOp ? fmt(custoTotal) : '—'}
                       </td>
 
                       <td className="px-4 py-3">
                         {jaTemOp ? (
                           <span className={`font-semibold ${lucroBruto >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                            {formatCurrency(lucroBruto)}
+                            {fmt(lucroBruto)}
                           </span>
                         ) : (
                           '—'
@@ -739,7 +800,7 @@ export default function PedidosPage() {
                       <td className="px-4 py-3">
                         {jaTemOp ? (
                           <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-                            margem >= 25
+                            margem >= margemAlvo
                               ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
                               : margem >= 10
                               ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
@@ -846,7 +907,7 @@ export default function PedidosPage() {
                 {filtered.length === 0 && (
                   <tr>
                     <td
-                      colSpan={16}
+                      colSpan={17}
                       className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400"
                     >
                       Nenhum pedido encontrado.
@@ -865,7 +926,7 @@ export default function PedidosPage() {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => setSelectedPedido(null)}
           />
-          <div className="relative z-10 w-full max-w-4xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+          <div className="relative z-10 w-full max-w-5xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
@@ -898,18 +959,19 @@ export default function PedidosPage() {
               const custoTotal = Number(breakdown?.total || 0);
 
               const valorVenda = Number(selectedPedido.valor || 0);
+              const precoSugerido = calculateSuggestedPrice(custoTotal, margemAlvo);
               const lucroBruto = valorVenda - custoTotal;
               const margem = valorVenda > 0 ? (lucroBruto / valorVenda) * 100 : 0;
 
               return (
                 <>
-                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                     <div className="erp-card p-4">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                         Valor de venda
                       </p>
                       <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
-                        {formatCurrency(valorVenda)}
+                        {fmt(valorVenda)}
                       </p>
                     </div>
 
@@ -918,7 +980,16 @@ export default function PedidosPage() {
                         Custo total
                       </p>
                       <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
-                        {formatCurrency(custoTotal)}
+                        {fmt(custoTotal)}
+                      </p>
+                    </div>
+
+                    <div className="erp-card p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Preço sugerido
+                      </p>
+                      <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
+                        {fmt(precoSugerido)}
                       </p>
                     </div>
 
@@ -927,7 +998,7 @@ export default function PedidosPage() {
                         Lucro bruto
                       </p>
                       <p className={`mt-2 text-base font-semibold ${lucroBruto >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                        {formatCurrency(lucroBruto)}
+                        {fmt(lucroBruto)}
                       </p>
                     </div>
 
@@ -950,7 +1021,7 @@ export default function PedidosPage() {
                         </p>
                       </div>
                       <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
-                        {formatCurrency(material)}
+                        {fmt(material)}
                       </p>
                     </div>
 
@@ -962,7 +1033,7 @@ export default function PedidosPage() {
                         </p>
                       </div>
                       <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
-                        {formatCurrency(impressao)}
+                        {fmt(impressao)}
                       </p>
                     </div>
 
@@ -974,7 +1045,7 @@ export default function PedidosPage() {
                         </p>
                       </div>
                       <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
-                        {formatCurrency(acabamento)}
+                        {fmt(acabamento)}
                       </p>
                     </div>
 
@@ -986,7 +1057,7 @@ export default function PedidosPage() {
                         </p>
                       </div>
                       <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
-                        {formatCurrency(operacional)}
+                        {fmt(operacional)}
                       </p>
                     </div>
                   </div>
@@ -1023,13 +1094,15 @@ export default function PedidosPage() {
 
                   <div className="mt-4 erp-card p-4">
                     <div className="mb-2 flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 text-sky-500" />
+                      <BadgeDollarSign className="h-4 w-4 text-sky-500" />
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                        Leitura gerencial
+                        Leitura comercial
                       </p>
                     </div>
                     <p className="text-sm text-slate-700 dark:text-slate-200">
-                      Agora o pedido mostra custo separado por matéria-prima, impressão, acabamento e operacional, deixando a análise mais próxima da realidade.
+                      Com margem alvo de <span className="font-semibold">{margemAlvo}%</span>, o preço sugerido para este pedido é{' '}
+                      <span className="font-semibold">{fmt(precoSugerido)}</span>. O valor de venda atual é{' '}
+                      <span className="font-semibold">{fmt(valorVenda)}</span>.
                     </p>
                   </div>
 
@@ -1054,7 +1127,7 @@ export default function PedidosPage() {
       {formOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeForm} />
-          <div className="relative z-10 w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+          <div className="relative z-10 w-full max-w-3xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
@@ -1115,7 +1188,7 @@ export default function PedidosPage() {
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
-                  Valor
+                  Valor de venda
                 </label>
                 <input
                   type="number"
@@ -1157,6 +1230,125 @@ export default function PedidosPage() {
                   <option>Entregue</option>
                   <option>Cancelado</option>
                 </select>
+              </div>
+
+              <div className="md:col-span-2 rounded-3xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/70">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Target className="h-4 w-4 text-violet-500" />
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                      Precificação automática
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500 dark:text-slate-400">Margem alvo</span>
+                    <select
+                      value={margemAlvo}
+                      onChange={(e) => setMargemAlvo(Number(e.target.value))}
+                      className="rounded-xl border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                    >
+                      <option value={20}>20%</option>
+                      <option value={25}>25%</option>
+                      <option value={30}>30%</option>
+                      <option value={35}>35%</option>
+                      <option value={40}>40%</option>
+                      <option value={45}>45%</option>
+                    </select>
+                  </div>
+                </div>
+
+                {previewBreakdown ? (
+                  <>
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-2xl bg-white p-3 dark:bg-slate-900">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Custo total</p>
+                        <p className="mt-1 font-semibold text-slate-900 dark:text-white">
+                          {fmt(previewBreakdown.total)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl bg-white p-3 dark:bg-slate-900">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Preço sugerido</p>
+                        <p className="mt-1 font-semibold text-slate-900 dark:text-white">
+                          {fmt(precoSugeridoPreview)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl bg-white p-3 dark:bg-slate-900">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Margem atual</p>
+                        <p className={`mt-1 font-semibold ${
+                          margemPreview >= margemAlvo
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : margemPreview >= 10
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}>
+                          {margemPreview.toFixed(1)}%
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl bg-white p-3 dark:bg-slate-900">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Situação</p>
+                        <p className={`mt-1 font-semibold ${
+                          Number(form.valor || 0) >= precoSugeridoPreview
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}>
+                          {Number(form.valor || 0) >= precoSugeridoPreview
+                            ? 'Preço ok'
+                            : 'Preço abaixo'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-2xl bg-white p-3 dark:bg-slate-900">
+                        <div className="flex items-center gap-2">
+                          <Package className="h-4 w-4 text-sky-500" />
+                          <p className="text-xs text-slate-500 dark:text-slate-400">Matéria-prima</p>
+                        </div>
+                        <p className="mt-1 font-semibold text-slate-900 dark:text-white">
+                          {fmt(previewBreakdown.material)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl bg-white p-3 dark:bg-slate-900">
+                        <div className="flex items-center gap-2">
+                          <Printer className="h-4 w-4 text-violet-500" />
+                          <p className="text-xs text-slate-500 dark:text-slate-400">Impressão</p>
+                        </div>
+                        <p className="mt-1 font-semibold text-slate-900 dark:text-white">
+                          {fmt(previewBreakdown.impressao)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl bg-white p-3 dark:bg-slate-900">
+                        <div className="flex items-center gap-2">
+                          <Scissors className="h-4 w-4 text-amber-500" />
+                          <p className="text-xs text-slate-500 dark:text-slate-400">Acabamento</p>
+                        </div>
+                        <p className="mt-1 font-semibold text-slate-900 dark:text-white">
+                          {fmt(previewBreakdown.acabamento)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl bg-white p-3 dark:bg-slate-900">
+                        <div className="flex items-center gap-2">
+                          <Cog className="h-4 w-4 text-emerald-500" />
+                          <p className="text-xs text-slate-500 dark:text-slate-400">Operacional</p>
+                        </div>
+                        <p className="mt-1 font-semibold text-slate-900 dark:text-white">
+                          {fmt(previewBreakdown.operacional)}
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    Preencha produto e quantidade para calcular custo e preço sugerido.
+                  </p>
+                )}
               </div>
 
               <div className="md:col-span-2">
