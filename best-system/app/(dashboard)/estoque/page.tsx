@@ -12,6 +12,7 @@ import {
   Boxes,
   ShieldAlert,
   CircleDollarSign,
+  Factory,
 } from 'lucide-react';
 import { supabase, EstoqueItem as EstoqueItemDB } from '@/lib/supabase';
 import EstoqueItemForm, { EstoqueItem } from '@/components/estoque/EstoqueItemForm';
@@ -46,6 +47,20 @@ function adaptFromDB(item: EstoqueItemDB) {
     valorUnit: item.valor_unitario,
     status: calcStatus(item.quantidade, item.estoque_minimo),
   };
+}
+
+function isRelacionadoProducao(categoria: string, item: string) {
+  const texto = `${categoria} ${item}`.toLowerCase();
+
+  return (
+    texto.includes('papel') ||
+    texto.includes('wire') ||
+    texto.includes('adesivo') ||
+    texto.includes('bopp') ||
+    texto.includes('capa') ||
+    texto.includes('miolo') ||
+    texto.includes('impress')
+  );
 }
 
 export default function EstoquePage() {
@@ -95,6 +110,9 @@ export default function EstoquePage() {
   const criticos = lista.filter((i) => i.status === 'Crítico').length;
   const baixos = lista.filter((i) => i.status === 'Baixo').length;
   const valorTotal = lista.reduce((sum, i) => sum + i.quantidade * i.valorUnit, 0);
+  const criticosProducao = lista.filter(
+    (i) => i.status === 'Crítico' && isRelacionadoProducao(i.categoria, i.item)
+  ).length;
 
   const handleSave = async (data: Omit<EstoqueItem, 'id' | 'status'>) => {
     const payload = {
@@ -147,7 +165,7 @@ export default function EstoquePage() {
 
   return (
     <div className="space-y-6">
-      <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+      <section className="grid grid-cols-2 gap-4 xl:grid-cols-5">
         <div className="erp-card p-5">
           <div className="mb-3 flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Itens cadastrados</p>
@@ -174,12 +192,36 @@ export default function EstoquePage() {
 
         <div className="erp-card p-5">
           <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Críticos p/ produção</p>
+            <Factory className="h-4 w-4 text-violet-500" />
+          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{criticosProducao}</p>
+        </div>
+
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Valor estimado</p>
             <CircleDollarSign className="h-4 w-4 text-emerald-500" />
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">{fmt(valorTotal)}</p>
         </div>
       </section>
+
+      {criticosProducao > 0 && (
+        <section className="rounded-3xl border border-red-200 bg-red-50 p-5 dark:border-red-500/20 dark:bg-red-500/10">
+          <div className="flex items-start gap-3">
+            <Factory className="mt-0.5 h-5 w-5 text-red-500" />
+            <div>
+              <h3 className="text-sm font-bold text-red-700 dark:text-red-300">
+                Atenção: existem itens críticos ligados à produção
+              </h3>
+              <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+                Alguns materiais importantes para fabricação estão em nível crítico. Isso pode travar ordens de produção.
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="erp-card overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-slate-200/70 px-5 py-4 dark:border-slate-800 md:flex-row md:items-center md:justify-between">
@@ -218,10 +260,10 @@ export default function EstoquePage() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1100px] text-sm">
+          <table className="w-full min-w-[1180px] text-sm">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-900/60">
-                {['Item', 'Categoria', 'Quantidade', 'Unidade', 'Mínimo', 'Fornecedor', 'Valor Unit.', 'Valor Total', 'Status', 'Ações'].map((h) => (
+                {['Item', 'Categoria', 'Quantidade', 'Unidade', 'Mínimo', 'Fornecedor', 'Valor Unit.', 'Valor Total', 'Status', 'Produção', 'Ações'].map((h) => (
                   <th key={h} className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     {h}
                   </th>
@@ -230,95 +272,111 @@ export default function EstoquePage() {
             </thead>
 
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {filtered.map((e) => (
-                <tr
-                  key={e.id}
-                  className={`transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50 ${e.status === 'Crítico' ? 'bg-red-50/40 dark:bg-red-500/5' : ''}`}
-                >
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`flex h-9 w-9 items-center justify-center rounded-2xl ${
-                          e.status === 'Crítico'
-                            ? 'bg-red-100 dark:bg-red-500/10'
-                            : e.status === 'Baixo'
-                            ? 'bg-amber-100 dark:bg-amber-500/10'
-                            : 'bg-slate-100 dark:bg-slate-800'
-                        }`}
-                      >
-                        <Package
-                          className={`h-4 w-4 ${
+              {filtered.map((e) => {
+                const ligadoProducao = isRelacionadoProducao(e.categoria, e.item);
+
+                return (
+                  <tr
+                    key={e.id}
+                    className={`transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50 ${e.status === 'Crítico' ? 'bg-red-50/40 dark:bg-red-500/5' : ''}`}
+                  >
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`flex h-9 w-9 items-center justify-center rounded-2xl ${
                             e.status === 'Crítico'
-                              ? 'text-red-500'
+                              ? 'bg-red-100 dark:bg-red-500/10'
                               : e.status === 'Baixo'
-                              ? 'text-amber-500'
-                              : 'text-slate-500'
+                              ? 'bg-amber-100 dark:bg-amber-500/10'
+                              : 'bg-slate-100 dark:bg-slate-800'
                           }`}
-                        />
+                        >
+                          <Package
+                            className={`h-4 w-4 ${
+                              e.status === 'Crítico'
+                                ? 'text-red-500'
+                                : e.status === 'Baixo'
+                                ? 'text-amber-500'
+                                : 'text-slate-500'
+                            }`}
+                          />
+                        </div>
+
+                        <span className="font-medium text-slate-800 dark:text-slate-100">{e.item}</span>
                       </div>
+                    </td>
 
-                      <span className="font-medium text-slate-800 dark:text-slate-100">{e.item}</span>
-                    </div>
-                  </td>
+                    <td className="px-5 py-3">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                        {e.categoria}
+                      </span>
+                    </td>
 
-                  <td className="px-5 py-3">
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                      {e.categoria}
-                    </span>
-                  </td>
+                    <td className={`px-5 py-3 font-bold ${e.status === 'Crítico' ? 'text-red-600 dark:text-red-400' : e.status === 'Baixo' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-900 dark:text-white'}`}>
+                      {e.quantidade.toLocaleString('pt-BR')}
+                    </td>
 
-                  <td className={`px-5 py-3 font-bold ${e.status === 'Crítico' ? 'text-red-600 dark:text-red-400' : e.status === 'Baixo' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-900 dark:text-white'}`}>
-                    {e.quantidade.toLocaleString('pt-BR')}
-                  </td>
+                    <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{e.unidade}</td>
+                    <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{e.estoqueMinimo}</td>
+                    <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{e.fornecedor || '—'}</td>
+                    <td className="px-5 py-3 text-slate-700 dark:text-slate-200">{fmt(e.valorUnit)}</td>
+                    <td className="px-5 py-3 font-semibold text-slate-900 dark:text-white">{fmt(e.quantidade * e.valorUnit)}</td>
 
-                  <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{e.unidade}</td>
-                  <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{e.estoqueMinimo}</td>
-                  <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{e.fornecedor || '—'}</td>
-                  <td className="px-5 py-3 text-slate-700 dark:text-slate-200">{fmt(e.valorUnit)}</td>
-                  <td className="px-5 py-3 font-semibold text-slate-900 dark:text-white">{fmt(e.quantidade * e.valorUnit)}</td>
+                    <td className="px-5 py-3">
+                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusConfig[e.status]}`}>
+                        {e.status}
+                      </span>
+                    </td>
 
-                  <td className="px-5 py-3">
-                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusConfig[e.status]}`}>
-                      {e.status}
-                    </span>
-                  </td>
+                    <td className="px-5 py-3">
+                      {ligadoProducao ? (
+                        <span className="inline-flex rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
+                          Ligado
+                        </span>
+                      ) : (
+                        <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                          Geral
+                        </span>
+                      )}
+                    </td>
 
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setQtyItem(e)}
-                        className="rounded-xl p-2 text-slate-500 transition hover:bg-emerald-50 hover:text-emerald-600 dark:text-slate-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-400"
-                        title="Atualizar quantidade"
-                      >
-                        <RefreshCw className="h-4 w-4" />
-                      </button>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setQtyItem(e)}
+                          className="rounded-xl p-2 text-slate-500 transition hover:bg-emerald-50 hover:text-emerald-600 dark:text-slate-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-400"
+                          title="Atualizar quantidade"
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                        </button>
 
-                      <button
-                        onClick={() => {
-                          setEditingItem(e);
-                          setFormOpen(true);
-                        }}
-                        className="rounded-xl p-2 text-slate-500 transition hover:bg-sky-50 hover:text-sky-600 dark:text-slate-400 dark:hover:bg-sky-500/10 dark:hover:text-sky-400"
-                        title="Editar"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
+                        <button
+                          onClick={() => {
+                            setEditingItem(e);
+                            setFormOpen(true);
+                          }}
+                          className="rounded-xl p-2 text-slate-500 transition hover:bg-sky-50 hover:text-sky-600 dark:text-slate-400 dark:hover:bg-sky-500/10 dark:hover:text-sky-400"
+                          title="Editar"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
 
-                      <button
-                        onClick={() => setDeleteConfirm(e.id)}
-                        className="rounded-xl p-2 text-slate-500 transition hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-500/10 dark:hover:text-red-400"
-                        title="Excluir"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                        <button
+                          onClick={() => setDeleteConfirm(e.id)}
+                          className="rounded-xl p-2 text-slate-500 transition hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                          title="Excluir"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
 
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400">
+                  <td colSpan={11} className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400">
                     Nenhum item de estoque encontrado.
                   </td>
                 </tr>
