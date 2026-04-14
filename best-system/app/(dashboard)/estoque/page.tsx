@@ -1,66 +1,67 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { supabase, EstoqueItem } from '@/lib/supabase';
-import { Plus, Search, TriangleAlert as AlertTriangle, Package, TrendingDown, Pencil, Trash2, RefreshCw } from 'lucide-react';
-import EstoqueItemForm from '@/components/estoque/EstoqueItemForm';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  Plus,
+  Search,
+  Package,
+  Pencil,
+  Trash2,
+  RefreshCw,
+  AlertTriangle,
+  Boxes,
+  ShieldAlert,
+  CircleDollarSign,
+} from 'lucide-react';
+import { supabase, EstoqueItem as EstoqueItemDB } from '@/lib/supabase';
+import EstoqueItemForm, { EstoqueItem } from '@/components/estoque/EstoqueItemForm';
 
-type FormEstoqueItem = {
-  id: string;
-  item: string;
-  categoria: string;
-  quantidade: number;
-  unidade: string;
-  estoqueMinimo: number;
-  fornecedor: string;
-  valorUnit: number;
-  status: string;
-};
+type StatusEstoque = 'Normal' | 'Baixo' | 'Crítico';
 
 const fmt = (v: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
-const statusConfig: Record<string, string> = {
-  Normal: 'bg-emerald-100 text-emerald-700',
-  Baixo: 'bg-amber-100 text-amber-700',
-  Crítico: 'bg-red-100 text-red-700',
-};
-
-function calcStatus(quantidade: number, estoqueMinimo: number): string {
+function calcStatus(quantidade: number, estoqueMinimo: number): StatusEstoque {
   if (quantidade === 0) return 'Crítico';
   if (quantidade < estoqueMinimo * 0.5) return 'Crítico';
   if (quantidade < estoqueMinimo) return 'Baixo';
   return 'Normal';
 }
 
-function toFormItem(e: EstoqueItem): FormEstoqueItem {
+const statusConfig: Record<StatusEstoque, string> = {
+  Normal: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
+  Baixo: 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
+  Crítico: 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300',
+};
+
+function adaptFromDB(item: EstoqueItemDB) {
   return {
-    id: e.id,
-    item: e.item,
-    categoria: e.categoria,
-    quantidade: e.quantidade,
-    unidade: e.unidade,
-    estoqueMinimo: e.estoque_minimo,
-    fornecedor: e.fornecedor,
-    valorUnit: e.valor_unitario,
-    status: calcStatus(e.quantidade, e.estoque_minimo),
+    id: item.id,
+    item: item.item,
+    categoria: item.categoria,
+    quantidade: item.quantidade,
+    unidade: item.unidade,
+    estoqueMinimo: item.estoque_minimo,
+    fornecedor: item.fornecedor,
+    valorUnit: item.valor_unitario,
+    status: calcStatus(item.quantidade, item.estoque_minimo),
   };
 }
 
 export default function EstoquePage() {
   const [search, setSearch] = useState('');
   const [filterCategoria, setFilterCategoria] = useState('Todas');
-  const [filterStatus, setFilterStatus] = useState('Todos');
-  const [lista, setLista] = useState<FormEstoqueItem[]>([]);
+  const [lista, setLista] = useState<(EstoqueItem & { status: StatusEstoque })[]>([]);
   const [loading, setLoading] = useState(true);
+
   const [formOpen, setFormOpen] = useState(false);
-  const [editando, setEditando] = useState<FormEstoqueItem | null>(null);
-  const [formMode, setFormMode] = useState<'edit' | 'qty'>('edit');
+  const [editingItem, setEditingItem] = useState<(EstoqueItem & { status: StatusEstoque }) | null>(null);
+  const [qtyItem, setQtyItem] = useState<(EstoqueItem & { status: StatusEstoque }) | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const fetchEstoque = useCallback(async () => {
     const { data } = await supabase.from('estoque').select('*').order('item');
-    if (data) setLista(data.map(toFormItem));
+    if (data) setLista(data.map(adaptFromDB));
     setLoading(false);
   }, []);
 
@@ -69,29 +70,34 @@ export default function EstoquePage() {
 
     const channel = supabase
       .channel('estoque_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'estoque' }, () => {
-        fetchEstoque();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'estoque' }, fetchEstoque)
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [fetchEstoque]);
 
-  const categorias = ['Todas', ...Array.from(new Set(lista.map(e => e.categoria)))];
+  const categorias = ['Todas', ...Array.from(new Set(lista.map((p) => p.categoria)))];
 
-  const filtered = lista.filter(e => {
-    const matchSearch = e.item.toLowerCase().includes(search.toLowerCase()) || e.fornecedor.toLowerCase().includes(search.toLowerCase());
-    const matchCat = filterCategoria === 'Todas' || e.categoria === filterCategoria;
-    const matchStatus = filterStatus === 'Todos' || e.status === filterStatus;
-    return matchSearch && matchCat && matchStatus;
-  });
+  const filtered = useMemo(() => {
+    return lista.filter((e) => {
+      const matchSearch =
+        e.item.toLowerCase().includes(search.toLowerCase()) ||
+        e.fornecedor.toLowerCase().includes(search.toLowerCase());
 
-  const totalCritico = lista.filter(e => e.status === 'Crítico').length;
-  const totalBaixo = lista.filter(e => e.status === 'Baixo').length;
-  const totalValor = lista.reduce((s, e) => s + e.quantidade * e.valorUnit, 0);
+      const matchCat = filterCategoria === 'Todas' || e.categoria === filterCategoria;
+      return matchSearch && matchCat;
+    });
+  }, [lista, search, filterCategoria]);
 
-  const handleSave = async (data: Omit<FormEstoqueItem, 'id' | 'status'>) => {
-    const record = {
+  const totalItens = lista.length;
+  const criticos = lista.filter((i) => i.status === 'Crítico').length;
+  const baixos = lista.filter((i) => i.status === 'Baixo').length;
+  const valorTotal = lista.reduce((sum, i) => sum + i.quantidade * i.valorUnit, 0);
+
+  const handleSave = async (data: Omit<EstoqueItem, 'id' | 'status'>) => {
+    const payload = {
       item: data.item,
       categoria: data.categoria,
       quantidade: data.quantidade,
@@ -99,27 +105,31 @@ export default function EstoquePage() {
       estoque_minimo: data.estoqueMinimo,
       fornecedor: data.fornecedor,
       valor_unitario: data.valorUnit,
+      updated_at: new Date().toISOString(),
     };
 
-    if (editando) {
-      await supabase.from('estoque').update({ ...record, updated_at: new Date().toISOString() }).eq('id', editando.id);
+    if (editingItem) {
+      await supabase.from('estoque').update(payload).eq('id', editingItem.id);
     } else {
-      await supabase.from('estoque').insert(record);
+      await supabase.from('estoque').insert(payload);
     }
+
     setFormOpen(false);
-    setEditando(null);
+    setEditingItem(null);
   };
 
-  const handleEdit = (e: FormEstoqueItem) => {
-    setEditando(e);
-    setFormMode('edit');
-    setFormOpen(true);
-  };
+  const handleQtySave = async (data: Omit<EstoqueItem, 'id' | 'status'>) => {
+    if (!qtyItem) return;
 
-  const handleQty = (e: FormEstoqueItem) => {
-    setEditando(e);
-    setFormMode('qty');
-    setFormOpen(true);
+    await supabase
+      .from('estoque')
+      .update({
+        quantidade: data.quantidade,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', qtyItem.id);
+
+    setQtyItem(null);
   };
 
   const handleDelete = async (id: string) => {
@@ -129,164 +139,232 @@ export default function EstoquePage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
+      <div className="flex h-64 items-center justify-center">
+        <div className="h-7 w-7 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-          <p className="text-xs font-medium text-slate-500">Total de Itens</p>
-          <p className="text-3xl font-bold text-slate-800 mt-1">{lista.length}</p>
-        </div>
-        <div className="rounded-xl border border-red-200 p-4 shadow-sm bg-red-50">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-red-500" />
-            <p className="text-xs font-medium text-red-600">Críticos</p>
+      <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Itens cadastrados</p>
+            <Boxes className="h-4 w-4 text-sky-500" />
           </div>
-          <p className="text-3xl font-bold text-red-600 mt-1">{totalCritico}</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{totalItens}</p>
         </div>
-        <div className="rounded-xl border border-amber-200 p-4 shadow-sm bg-amber-50">
-          <div className="flex items-center gap-2">
-            <TrendingDown className="w-4 h-4 text-amber-500" />
-            <p className="text-xs font-medium text-amber-600">Estoque Baixo</p>
+
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Estoque baixo</p>
+            <AlertTriangle className="h-4 w-4 text-amber-500" />
           </div>
-          <p className="text-3xl font-bold text-amber-600 mt-1">{totalBaixo}</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{baixos}</p>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-          <p className="text-xs font-medium text-slate-500">Valor em Estoque</p>
-          <p className="text-2xl font-bold text-slate-800 mt-1">{fmt(totalValor)}</p>
-        </div>
-      </div>
 
-      {(totalCritico > 0 || totalBaixo > 0) && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3">
-          <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
-          <p className="text-sm text-red-700 font-medium">
-            {totalCritico} item(ns) em nível crítico e {totalBaixo} item(ns) com estoque baixo. Solicite reposição imediatamente.
-          </p>
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Críticos</p>
+            <ShieldAlert className="h-4 w-4 text-red-500" />
+          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{criticos}</p>
         </div>
-      )}
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Valor estimado</p>
+            <CircleDollarSign className="h-4 w-4 text-emerald-500" />
+          </div>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">{fmt(valorTotal)}</p>
+        </div>
+      </section>
+
+      <section className="erp-card overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-slate-200/70 px-5 py-4 dark:border-slate-800 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Buscar item..."
-                className="pl-9 pr-4 h-9 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-sky-500 w-44"
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar item ou fornecedor..."
+                className="erp-input w-72 pl-10"
               />
             </div>
+
             <select
               value={filterCategoria}
-              onChange={e => setFilterCategoria(e.target.value)}
-              className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:outline-none text-slate-600"
+              onChange={(e) => setFilterCategoria(e.target.value)}
+              className="erp-input w-44"
             >
-              {categorias.map(c => <option key={c}>{c}</option>)}
-            </select>
-            <select
-              value={filterStatus}
-              onChange={e => setFilterStatus(e.target.value)}
-              className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:outline-none text-slate-600"
-            >
-              {['Todos', 'Normal', 'Baixo', 'Crítico'].map(s => <option key={s}>{s}</option>)}
+              {categorias.map((c) => (
+                <option key={c}>{c}</option>
+              ))}
             </select>
           </div>
+
           <button
-            onClick={() => { setEditando(null); setFormMode('edit'); setFormOpen(true); }}
-            className="flex items-center gap-2 bg-sky-500 hover:bg-sky-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            onClick={() => {
+              setEditingItem(null);
+              setFormOpen(true);
+            }}
+            className="erp-button-primary"
           >
-            <Plus className="w-4 h-4" />
-            Novo Item
+            <Plus className="mr-2 h-4 w-4" />
+            Novo item
           </button>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[1100px] text-sm">
             <thead>
-              <tr className="bg-slate-50">
-                {['Item', 'Categoria', 'Qtd', 'Unid.', 'Est. Mín.', 'Fornecedor', 'Valor Unit.', 'Total', 'Status', 'Ações'].map(h => (
-                  <th key={h} className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+              <tr className="bg-slate-50 dark:bg-slate-900/60">
+                {['Item', 'Categoria', 'Quantidade', 'Unidade', 'Mínimo', 'Fornecedor', 'Valor Unit.', 'Valor Total', 'Status', 'Ações'].map((h) => (
+                  <th key={h} className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filtered.map((e) => (
-                <tr key={e.id} className={`hover:bg-slate-50 transition-colors ${e.status === 'Crítico' ? 'bg-red-50/50' : ''}`}>
+                <tr
+                  key={e.id}
+                  className={`transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50 ${e.status === 'Crítico' ? 'bg-red-50/40 dark:bg-red-500/5' : ''}`}
+                >
                   <td className="px-5 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${e.status === 'Crítico' ? 'bg-red-100' : e.status === 'Baixo' ? 'bg-amber-100' : 'bg-slate-100'}`}>
-                        <Package className={`w-4 h-4 ${e.status === 'Crítico' ? 'text-red-500' : e.status === 'Baixo' ? 'text-amber-500' : 'text-slate-500'}`} />
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`flex h-9 w-9 items-center justify-center rounded-2xl ${
+                          e.status === 'Crítico'
+                            ? 'bg-red-100 dark:bg-red-500/10'
+                            : e.status === 'Baixo'
+                            ? 'bg-amber-100 dark:bg-amber-500/10'
+                            : 'bg-slate-100 dark:bg-slate-800'
+                        }`}
+                      >
+                        <Package
+                          className={`h-4 w-4 ${
+                            e.status === 'Crítico'
+                              ? 'text-red-500'
+                              : e.status === 'Baixo'
+                              ? 'text-amber-500'
+                              : 'text-slate-500'
+                          }`}
+                        />
                       </div>
-                      <span className="text-slate-800 font-medium text-xs">{e.item}</span>
+
+                      <span className="font-medium text-slate-800 dark:text-slate-100">{e.item}</span>
                     </div>
                   </td>
+
                   <td className="px-5 py-3">
-                    <span className="inline-flex px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-xs">{e.categoria}</span>
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                      {e.categoria}
+                    </span>
                   </td>
-                  <td className={`px-5 py-3 font-bold ${e.status === 'Crítico' ? 'text-red-600' : e.status === 'Baixo' ? 'text-amber-600' : 'text-slate-800'}`}>
+
+                  <td className={`px-5 py-3 font-bold ${e.status === 'Crítico' ? 'text-red-600 dark:text-red-400' : e.status === 'Baixo' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-900 dark:text-white'}`}>
                     {e.quantidade.toLocaleString('pt-BR')}
                   </td>
-                  <td className="px-5 py-3 text-slate-500">{e.unidade}</td>
-                  <td className="px-5 py-3 text-slate-500">{e.estoqueMinimo}</td>
-                  <td className="px-5 py-3 text-slate-600 text-xs">{e.fornecedor}</td>
-                  <td className="px-5 py-3 text-slate-700">{fmt(e.valorUnit)}</td>
-                  <td className="px-5 py-3 text-slate-800 font-semibold">{fmt(e.quantidade * e.valorUnit)}</td>
+
+                  <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{e.unidade}</td>
+                  <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{e.estoqueMinimo}</td>
+                  <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{e.fornecedor || '—'}</td>
+                  <td className="px-5 py-3 text-slate-700 dark:text-slate-200">{fmt(e.valorUnit)}</td>
+                  <td className="px-5 py-3 font-semibold text-slate-900 dark:text-white">{fmt(e.quantidade * e.valorUnit)}</td>
+
                   <td className="px-5 py-3">
-                    <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${statusConfig[e.status]}`}>
+                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusConfig[e.status]}`}>
                       {e.status}
                     </span>
                   </td>
+
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-2">
-                      <button onClick={() => handleQty(e)} className="text-xs text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1" title="Atualizar quantidade">
-                        <RefreshCw className="w-3 h-3" />
-                        Qtd
+                      <button
+                        onClick={() => setQtyItem(e)}
+                        className="rounded-xl p-2 text-slate-500 transition hover:bg-emerald-50 hover:text-emerald-600 dark:text-slate-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-400"
+                        title="Atualizar quantidade"
+                      >
+                        <RefreshCw className="h-4 w-4" />
                       </button>
-                      <button onClick={() => handleEdit(e)} className="text-xs text-sky-600 hover:text-sky-700 font-medium flex items-center gap-1">
-                        <Pencil className="w-3 h-3" />
-                        Editar
+
+                      <button
+                        onClick={() => {
+                          setEditingItem(e);
+                          setFormOpen(true);
+                        }}
+                        className="rounded-xl p-2 text-slate-500 transition hover:bg-sky-50 hover:text-sky-600 dark:text-slate-400 dark:hover:bg-sky-500/10 dark:hover:text-sky-400"
+                        title="Editar"
+                      >
+                        <Pencil className="h-4 w-4" />
                       </button>
-                      <button onClick={() => setDeleteConfirm(e.id)} className="text-xs text-red-400 hover:text-red-500 font-medium">
-                        <Trash2 className="w-3.5 h-3.5" />
+
+                      <button
+                        onClick={() => setDeleteConfirm(e.id)}
+                        className="rounded-xl p-2 text-slate-500 transition hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                        title="Excluir"
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
                   </td>
                 </tr>
               ))}
+
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="text-center py-12 text-slate-400 text-sm">Nenhum item encontrado.</td>
+                  <td colSpan={10} className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400">
+                    Nenhum item de estoque encontrado.
+                  </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
 
       <EstoqueItemForm
         open={formOpen}
-        onClose={() => { setFormOpen(false); setEditando(null); }}
+        onClose={() => {
+          setFormOpen(false);
+          setEditingItem(null);
+        }}
         onSave={handleSave}
-        item={editando}
-        mode={formMode}
+        item={editingItem}
       />
 
-      {deleteConfirm !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
-            <h3 className="font-semibold text-slate-800 mb-2">Excluir item de estoque?</h3>
-            <p className="text-sm text-slate-500 mb-5">Esta ação não pode ser desfeita.</p>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setDeleteConfirm(null)} className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors">Cancelar</button>
-              <button onClick={() => handleDelete(deleteConfirm)} className="px-5 py-2 text-sm bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors font-medium">Excluir</button>
+      <EstoqueItemForm
+        open={!!qtyItem}
+        onClose={() => setQtyItem(null)}
+        onSave={handleQtySave}
+        item={qtyItem}
+        mode="qty"
+      />
+
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)} />
+          <div className="relative z-10 w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Excluir item</h3>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+              Essa ação remove o item do estoque. Deseja continuar?
+            </p>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button onClick={() => setDeleteConfirm(null)} className="erp-button-secondary">
+                Cancelar
+              </button>
+              <button
+                onClick={() => handleDelete(deleteConfirm)}
+                className="inline-flex items-center justify-center rounded-2xl bg-red-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-600"
+              >
+                Excluir
+              </button>
             </div>
           </div>
         </div>
