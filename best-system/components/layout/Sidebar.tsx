@@ -23,6 +23,7 @@ import {
   Factory,
   ClipboardList,
   ShoppingBag,
+  TrendingUp, // 👈 ICONE DO CRM
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -42,12 +43,15 @@ const ALL_NAV_ITEMS: NavItem[] = [
   { href: '/produtos', label: 'Produtos', icon: Package },
   { href: '/pedidos', label: 'Pedidos', icon: ShoppingCart },
   { href: '/clientes', label: 'Clientes', icon: Users },
+
+  // 🚀 NOVO CRM
+  { href: '/crm', label: 'CRM', icon: TrendingUp },
+
   { href: '/comissoes', label: 'Comissões', icon: Award, adminOnly: true },
   { href: '/metas', label: 'Metas', icon: Target, adminOnly: true },
   { href: '/estoque', label: 'Estoque', icon: Boxes, adminOnly: true },
   { href: '/usuarios', label: 'Usuários', icon: UserCog, adminOnly: true },
 
-  // Preparadas para a próxima etapa
   { href: '/producao', label: 'Produção', icon: Factory, adminOnly: true, soon: true },
   { href: '/ficha-tecnica', label: 'Ficha Técnica', icon: ClipboardList, adminOnly: true, soon: true },
   { href: '/compras', label: 'Compras', icon: ShoppingBag, adminOnly: true, soon: true },
