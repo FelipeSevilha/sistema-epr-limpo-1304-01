@@ -49,6 +49,9 @@ type OrdemProducaoRow = {
   produto?: string | null;
   quantidade?: number | null;
   custo_previsto?: number | null;
+  prioridade?: string | null;
+  etapa?: string | null;
+  prazo?: string | null;
 };
 
 type FichaTecnicaItem = {
@@ -267,7 +270,7 @@ export default function PedidosPage() {
 
       const [pedidosRes, ordensRes, fichaRes, estoqueRes] = await Promise.all([
         supabase.from('pedidos').select('*').order('created_at', { ascending: false }),
-        supabase.from('ordens_producao').select('id,pedido_id,pedido_numero,produto,quantidade,custo_previsto').order('created_at', { ascending: false }),
+        supabase.from('ordens_producao').select('*').order('created_at', { ascending: false }),
         supabase.from('ficha_tecnica').select('*'),
         supabase.from('estoque').select('*'),
       ]);
@@ -540,8 +543,11 @@ export default function PedidosPage() {
         pedido_numero: pedido.numero || 'Sem número',
         cliente_nome: pedido.cliente_nome || '',
         produto: pedido.produto || '',
+        produto_nome: pedido.produto || '',
         quantidade: Number(pedido.quantidade || 0),
-        status: 'Pronta para produção',
+        status: 'Em produção',
+        etapa: 'Aguardando',
+        prioridade: 'Normal',
         prazo: pedido.prazo || null,
         progresso: 0,
         materiais_ok: false,
@@ -685,7 +691,7 @@ export default function PedidosPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1750px] text-sm">
+            <table className="w-full min-w-[1850px] text-sm">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-900/60">
                   {[
@@ -702,8 +708,9 @@ export default function PedidosPage() {
                     'Custo Total',
                     'Lucro',
                     'Margem',
+                    'Etapa',
+                    'Prioridade',
                     'Status',
-                    'Produção',
                     'Prazo',
                     'Ações',
                   ].map((h) => (
@@ -725,6 +732,7 @@ export default function PedidosPage() {
                     'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
 
                   const jaTemOp = pedidosComOp.has(pedido.id);
+                  const ordem = pedido.id ? ordensMap.get(pedido.id) : undefined;
                   const breakdown = pedido.id ? breakdownMap.get(pedido.id) : undefined;
 
                   const material = Number(breakdown?.material || 0);
@@ -813,24 +821,20 @@ export default function PedidosPage() {
                         )}
                       </td>
 
+                      <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                        {ordem?.etapa || '—'}
+                      </td>
+
+                      <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                        {ordem?.prioridade || '—'}
+                      </td>
+
                       <td className="px-4 py-3">
                         <span
                           className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass}`}
                         >
                           {status}
                         </span>
-                      </td>
-
-                      <td className="px-4 py-3">
-                        {jaTemOp ? (
-                          <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
-                            Gerada
-                          </span>
-                        ) : (
-                          <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
-                            Pendente
-                          </span>
-                        )}
                       </td>
 
                       <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
@@ -907,7 +911,7 @@ export default function PedidosPage() {
                 {filtered.length === 0 && (
                   <tr>
                     <td
-                      colSpan={17}
+                      colSpan={18}
                       className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400"
                     >
                       Nenhum pedido encontrado.
@@ -950,6 +954,7 @@ export default function PedidosPage() {
             </div>
 
             {(() => {
+              const ordem = selectedPedido.id ? ordensMap.get(selectedPedido.id) : undefined;
               const breakdown = selectedPedido.id ? breakdownMap.get(selectedPedido.id) : undefined;
 
               const material = Number(breakdown?.material || 0);
@@ -1077,17 +1082,13 @@ export default function PedidosPage() {
 
                     <div className="erp-card p-4">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                        Prazo / Produção
+                        Produção
                       </p>
                       <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
-                        {selectedPedido.prazo
-                          ? new Date(`${selectedPedido.prazo}T00:00:00`).toLocaleDateString('pt-BR')
-                          : 'Não informado'}
+                        {ordem?.etapa || 'Não gerada'}
                       </p>
                       <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                        {selectedPedido.id && ordensMap.get(selectedPedido.id)
-                          ? 'Ordem de produção gerada'
-                          : 'Produção ainda não gerada'}
+                        Prioridade: {ordem?.prioridade || '—'}
                       </p>
                     </div>
                   </div>
