@@ -92,7 +92,19 @@ export interface Pedido {
   produto: string;
   quantidade: number;
   valor: number;
-  status: 'Aguardando' | 'Em Andamento' | 'Em Produção' | 'Em Acabamento' | 'Pronto' | 'Entregue' | 'Atrasado' | 'Cancelado' | 'Produção' | 'Acabamento' | 'Entrega' | 'Concluído';
+  status:
+    | 'Aguardando'
+    | 'Em Andamento'
+    | 'Em Produção'
+    | 'Em Acabamento'
+    | 'Pronto'
+    | 'Entregue'
+    | 'Atrasado'
+    | 'Cancelado'
+    | 'Produção'
+    | 'Acabamento'
+    | 'Entrega'
+    | 'Concluído';
   prazo: string | null;
   observacoes: string;
   created_at: string;
@@ -138,6 +150,36 @@ export interface ContaReceber {
   updated_at: string;
 }
 
+export interface FichaTecnicaItem {
+  id: string;
+  produto_nome: string;
+  material_nome: string;
+  quantidade: number;
+  unidade: string;
+  created_at: string;
+}
+
+export interface OrdemProducao {
+  id: string;
+  pedido_id: string | null;
+  pedido_numero: string;
+  cliente_nome: string;
+  produto: string;
+  quantidade: number;
+  status:
+    | 'Aguardando material'
+    | 'Pronta para produção'
+    | 'Em produção'
+    | 'Pausada'
+    | 'Finalizada';
+  prazo: string | null;
+  progresso: number;
+  materiais_ok: boolean;
+  custo_previsto: number;
+  created_at: string;
+  updated_at: string;
+}
+
 interface AuthUser {
   id: string;
   email: string;
@@ -156,12 +198,15 @@ interface DB {
   estoque: EstoqueItem[];
   contas_pagar: ContaPagar[];
   contas_receber: ContaReceber[];
+  ficha_tecnica: FichaTecnicaItem[];
+  ordens_producao: OrdemProducao[];
 }
 
-const STORAGE_KEY = 'grafica_dsevilha_local_db_v2';
-const SESSION_KEY = 'grafica_dsevilha_session_v2';
+const STORAGE_KEY = 'grafica_dsevilha_local_db_v3';
+const SESSION_KEY = 'grafica_dsevilha_session_v3';
 
 const nowIso = () => new Date().toISOString();
+
 const makeId = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -172,21 +217,74 @@ function monthYear(date: string) {
   return { ano: d.getFullYear(), mes: d.getMonth() + 1 };
 }
 
+function safeArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function clone<T>(value: T): T {
+  if (value === undefined || value === null) return value;
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 function seedDatabase(): DB {
   const created = nowIso();
 
   const auth_users: AuthUser[] = [
-    { id: 'user-admin-felipe', email: 'felipe@graficadesevilha.com.br', password: '123456', user_metadata: { name: 'Felipe Sevilha' } },
-    { id: 'user-admin-wanessa', email: 'wanessa@graficadesevilha.com.br', password: '123456', user_metadata: { name: 'Wanessa Castro' } },
-    { id: 'user-vendedor-robson', email: 'robson@graficadesevilha.com.br', password: '123456', user_metadata: { name: 'Robson Moreno' } },
-    { id: 'user-vendedor-roberta', email: 'roberta@graficadesevilha.com.br', password: '123456', user_metadata: { name: 'Roberta Moreno' } },
+    {
+      id: 'user-admin-felipe',
+      email: 'felipe@graficadesevilha.com.br',
+      password: '123456',
+      user_metadata: { name: 'Felipe Sevilha' },
+    },
+    {
+      id: 'user-admin-wanessa',
+      email: 'wanessa@graficadesevilha.com.br',
+      password: '123456',
+      user_metadata: { name: 'Wanessa Castro' },
+    },
+    {
+      id: 'user-vendedor-robson',
+      email: 'robson@graficadesevilha.com.br',
+      password: '123456',
+      user_metadata: { name: 'Robson Moreno' },
+    },
+    {
+      id: 'user-vendedor-roberta',
+      email: 'roberta@graficadesevilha.com.br',
+      password: '123456',
+      user_metadata: { name: 'Roberta Moreno' },
+    },
   ];
 
   const user_profiles: UserProfile[] = [
-    { id: 'user-admin-felipe', name: 'Felipe Sevilha', role: 'admin', ativo: true, created_at: created },
-    { id: 'user-admin-wanessa', name: 'Wanessa Castro', role: 'admin', ativo: true, created_at: created },
-    { id: 'user-vendedor-robson', name: 'Robson Moreno', role: 'vendedor', ativo: true, created_at: created },
-    { id: 'user-vendedor-roberta', name: 'Roberta Moreno', role: 'vendedor', ativo: true, created_at: created },
+    {
+      id: 'user-admin-felipe',
+      name: 'Felipe Sevilha',
+      role: 'admin',
+      ativo: true,
+      created_at: created,
+    },
+    {
+      id: 'user-admin-wanessa',
+      name: 'Wanessa Castro',
+      role: 'admin',
+      ativo: true,
+      created_at: created,
+    },
+    {
+      id: 'user-vendedor-robson',
+      name: 'Robson Moreno',
+      role: 'vendedor',
+      ativo: true,
+      created_at: created,
+    },
+    {
+      id: 'user-vendedor-roberta',
+      name: 'Roberta Moreno',
+      role: 'vendedor',
+      ativo: true,
+      created_at: created,
+    },
   ];
 
   const clientes: Cliente[] = mockClientes.map((c) => ({
@@ -231,6 +329,7 @@ function seedDatabase(): DB {
 
   mockOrcamentos.forEach((o, index) => {
     const id = `orc-${index + 1}`;
+
     orcamentos.push({
       id,
       numero: o.numero,
@@ -244,6 +343,7 @@ function seedDatabase(): DB {
       created_at: `${o.criacao}T08:00:00.000Z`,
       updated_at: `${o.criacao}T08:00:00.000Z`,
     });
+
     o.itens.forEach((item, itemIndex) => {
       orcamento_items.push({
         id: `orc-item-${index + 1}-${itemIndex + 1}`,
@@ -311,6 +411,9 @@ function seedDatabase(): DB {
     updated_at: created,
   }));
 
+  const ficha_tecnica: FichaTecnicaItem[] = [];
+  const ordens_producao: OrdemProducao[] = [];
+
   return {
     auth_users,
     user_profiles,
@@ -322,6 +425,8 @@ function seedDatabase(): DB {
     estoque,
     contas_pagar,
     contas_receber,
+    ficha_tecnica,
+    ordens_producao,
   };
 }
 
@@ -329,16 +434,46 @@ function canUseStorage() {
   return typeof window !== 'undefined' && typeof localStorage !== 'undefined';
 }
 
+function normalizeDb(raw: unknown): DB {
+  const seed = seedDatabase();
+  const parsed = (raw && typeof raw === 'object' ? raw : {}) as Partial<DB>;
+
+  return {
+    auth_users: safeArray<AuthUser>(parsed.auth_users).length
+      ? safeArray<AuthUser>(parsed.auth_users)
+      : seed.auth_users,
+    user_profiles: safeArray<UserProfile>(parsed.user_profiles).length
+      ? safeArray<UserProfile>(parsed.user_profiles)
+      : seed.user_profiles,
+    clientes: safeArray<Cliente>(parsed.clientes),
+    produtos: safeArray<Produto>(parsed.produtos),
+    orcamentos: safeArray<Orcamento>(parsed.orcamentos),
+    orcamento_items: safeArray<OrcamentoItem>(parsed.orcamento_items),
+    pedidos: safeArray<Pedido>(parsed.pedidos),
+    estoque: safeArray<EstoqueItem>(parsed.estoque),
+    contas_pagar: safeArray<ContaPagar>(parsed.contas_pagar),
+    contas_receber: safeArray<ContaReceber>(parsed.contas_receber),
+    ficha_tecnica: safeArray<FichaTecnicaItem>(parsed.ficha_tecnica),
+    ordens_producao: safeArray<OrdemProducao>(parsed.ordens_producao),
+  };
+}
+
 function readDb(): DB {
   if (!canUseStorage()) return seedDatabase();
+
   const raw = localStorage.getItem(STORAGE_KEY);
+
   if (!raw) {
     const seed = seedDatabase();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
     return seed;
   }
+
   try {
-    return JSON.parse(raw) as DB;
+    const parsed = JSON.parse(raw) as unknown;
+    const normalized = normalizeDb(parsed);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+    return normalized;
   } catch {
     const seed = seedDatabase();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
@@ -347,16 +482,21 @@ function readDb(): DB {
 }
 
 function writeDb(db: DB) {
-  if (canUseStorage()) localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
-}
-
-function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value));
+  if (canUseStorage()) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+  }
 }
 
 function projectColumns<T extends Record<string, unknown>>(rows: T[], select?: string | null) {
-  if (!select || select.trim() === '*' || select.includes('orcamento_items')) return clone(rows);
-  const cols = select.split(',').map((s) => s.trim()).filter(Boolean);
+  if (!select || select.trim() === '*' || select.includes('orcamento_items')) {
+    return clone(rows);
+  }
+
+  const cols = select
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   return rows.map((row) => {
     const projected: Record<string, unknown> = {};
     cols.forEach((c) => {
@@ -366,7 +506,8 @@ function projectColumns<T extends Record<string, unknown>>(rows: T[], select?: s
   });
 }
 
-class QueryBuilder<T extends Record<string, unknown>> implements PromiseLike<{ data: any; error: null }> {
+class QueryBuilder<T extends Record<string, unknown>>
+  implements PromiseLike<{ data: any; error: null }> {
   private filters: Array<(row: T) => boolean> = [];
   private selectClause: string | null = null;
   private orderBy: { field: string; ascending: boolean } | null = null;
@@ -429,7 +570,9 @@ class QueryBuilder<T extends Record<string, unknown>> implements PromiseLike<{ d
   }
 
   then<TResult1 = { data: any; error: null }, TResult2 = never>(
-    onfulfilled?: ((value: { data: any; error: null }) => TResult1 | PromiseLike<TResult1>) | null,
+    onfulfilled?:
+      | ((value: { data: any; error: null }) => TResult1 | PromiseLike<TResult1>)
+      | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
     return this.execute().then(onfulfilled, onrejected);
@@ -437,20 +580,36 @@ class QueryBuilder<T extends Record<string, unknown>> implements PromiseLike<{ d
 
   private async execute(): Promise<{ data: any; error: null }> {
     const db = readDb();
-    const tableRows = clone(db[this.table] as T[]);
+    const tableRows = safeArray<T>(clone(db[this.table] as T[]));
 
     if (this.mode === 'insert') {
       const items = Array.isArray(this.payload) ? this.payload : [this.payload ?? {}];
+
       const inserted = items.map((item) => {
-        const base = item as Record<string, unknown>;
+        const base = (item ?? {}) as Record<string, unknown>;
         const now = nowIso();
-        const enriched: Record<string, unknown> = { id: makeId(), ...base };
+
+        const enriched: Record<string, unknown> = {
+          id: makeId(),
+          ...base,
+        };
+
         if (!('created_at' in enriched)) enriched.created_at = now;
-        if (!('updated_at' in enriched) && this.table !== 'orcamento_items' && this.table !== 'user_profiles') enriched.updated_at = now;
+        if (
+          !('updated_at' in enriched) &&
+          this.table !== 'orcamento_items' &&
+          this.table !== 'user_profiles' &&
+          this.table !== 'ficha_tecnica'
+        ) {
+          enriched.updated_at = now;
+        }
+
         return enriched as T;
       });
+
       (db[this.table] as T[]).push(...clone(inserted));
       writeDb(db);
+
       const data = this.expectSingle ? inserted[0] ?? null : inserted;
       return { data, error: null };
     }
@@ -460,6 +619,7 @@ class QueryBuilder<T extends Record<string, unknown>> implements PromiseLike<{ d
     if (this.mode === 'update') {
       const payload = (this.payload ?? {}) as Partial<T>;
       const updated: T[] = [];
+
       (db[this.table] as T[]).forEach((row, index, arr) => {
         if (this.filters.every((fn) => fn(row))) {
           const merged = { ...row, ...payload } as T;
@@ -467,20 +627,27 @@ class QueryBuilder<T extends Record<string, unknown>> implements PromiseLike<{ d
           updated.push(clone(merged));
         }
       });
+
       writeDb(db);
+
       const data = this.expectSingle ? updated[0] ?? null : updated;
       return { data, error: null };
     }
 
     if (this.mode === 'delete') {
-      const kept = (db[this.table] as T[]).filter((row) => !this.filters.every((fn) => fn(row)));
+      const kept = (db[this.table] as T[]).filter(
+        (row) => !this.filters.every((fn) => fn(row)),
+      );
+
       db[this.table] = kept as never;
       writeDb(db);
+
       return { data: null, error: null };
     }
 
     if (this.orderBy) {
       const { field, ascending } = this.orderBy;
+
       matched.sort((a, b) => {
         const av = String(a[field as keyof T] ?? '');
         const bv = String(b[field as keyof T] ?? '');
@@ -490,6 +657,7 @@ class QueryBuilder<T extends Record<string, unknown>> implements PromiseLike<{ d
 
     if (this.table === 'orcamentos' && this.selectClause?.includes('orcamento_items')) {
       const items = db.orcamento_items as unknown as OrcamentoItem[];
+
       matched = matched.map((row) => ({
         ...row,
         orcamento_items: items.filter((item) => item.orcamento_id === row.id),
@@ -497,17 +665,22 @@ class QueryBuilder<T extends Record<string, unknown>> implements PromiseLike<{ d
     }
 
     const projected = projectColumns(matched, this.selectClause);
-    const data = this.expectSingle ? (projected[0] ?? null) : projected;
+    const data = this.expectSingle ? projected[0] ?? null : projected;
+
     return { data, error: null };
   }
 }
 
-const authListeners = new Set<(event: string, session: { user: { id: string; email?: string } } | null) => void>();
+const authListeners = new Set<
+  (event: string, session: { user: { id: string; email?: string } } | null) => void
+>();
 
 function readSession() {
   if (!canUseStorage()) return null;
+
   const raw = localStorage.getItem(SESSION_KEY);
   if (!raw) return null;
+
   try {
     return JSON.parse(raw) as { user: { id: string; email?: string } };
   } catch {
@@ -517,11 +690,15 @@ function readSession() {
 
 function writeSession(session: { user: { id: string; email?: string } } | null) {
   if (!canUseStorage()) return;
+
   if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   else localStorage.removeItem(SESSION_KEY);
 }
 
-function emitAuth(event: string, session: { user: { id: string; email?: string } } | null) {
+function emitAuth(
+  event: string,
+  session: { user: { id: string; email?: string } } | null,
+) {
   authListeners.forEach((listener) => listener(event, session));
 }
 
@@ -529,12 +706,20 @@ export const supabase = {
   from<TTable extends keyof DB>(table: TTable) {
     return new QueryBuilder<DB[TTable][number]>(table);
   },
+
   auth: {
     async getSession() {
       return { data: { session: readSession() } };
     },
-    onAuthStateChange(callback: (event: string, session: { user: { id: string; email?: string } } | null) => void) {
+
+    onAuthStateChange(
+      callback: (
+        event: string,
+        session: { user: { id: string; email?: string } } | null,
+      ) => void,
+    ) {
       authListeners.add(callback);
+
       return {
         data: {
           subscription: {
@@ -543,34 +728,78 @@ export const supabase = {
         },
       };
     },
-    async signInWithPassword({ email, password }: { email: string; password: string }) {
+
+    async signInWithPassword({
+      email,
+      password,
+    }: {
+      email: string;
+      password: string;
+    }) {
       const db = readDb();
-      const authUser = db.auth_users.find((u) => u.email === email && u.password === password);
-      if (!authUser) return { data: { user: null }, error: new Error('Credenciais inválidas') };
+      const authUser = db.auth_users.find(
+        (u) => u.email === email && u.password === password,
+      );
+
+      if (!authUser) {
+        return { data: { user: null }, error: new Error('Credenciais inválidas') };
+      }
+
       const session = { user: { id: authUser.id, email: authUser.email } };
       writeSession(session);
       emitAuth('SIGNED_IN', session);
+
       return { data: { user: session.user }, error: null };
     },
+
     async signOut() {
       writeSession(null);
       emitAuth('SIGNED_OUT', null);
       return { error: null };
     },
+
     admin: {
       async listUsers() {
         const db = readDb();
-        return { data: { users: db.auth_users.map((u) => ({ id: u.id, email: u.email })) }, error: null };
+
+        return {
+          data: {
+            users: db.auth_users.map((u) => ({
+              id: u.id,
+              email: u.email,
+            })),
+          },
+          error: null,
+        };
       },
-      async createUser({ email, password, user_metadata }: { email: string; password: string; email_confirm?: boolean; user_metadata?: { name?: string } }) {
+
+      async createUser({
+        email,
+        password,
+        user_metadata,
+      }: {
+        email: string;
+        password: string;
+        email_confirm?: boolean;
+        user_metadata?: { name?: string };
+      }) {
         const db = readDb();
-        const user = { id: makeId(), email, password, user_metadata };
+
+        const user = {
+          id: makeId(),
+          email,
+          password,
+          user_metadata,
+        };
+
         db.auth_users.push(user);
         writeDb(db);
+
         return { data: { user }, error: null };
       },
     },
   },
+
   channel(_name?: string) {
     return {
       on(..._args: any[]) {
@@ -581,6 +810,7 @@ export const supabase = {
       },
     };
   },
+
   removeChannel(_channel?: any) {
     return true;
   },
