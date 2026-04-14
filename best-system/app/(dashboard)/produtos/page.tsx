@@ -11,7 +11,9 @@ import {
   ClipboardList,
   Eye,
   Pencil,
+  Link2,
 } from 'lucide-react';
+import Link from 'next/link';
 
 type ProdutoItem = {
   id: string;
@@ -210,7 +212,7 @@ export default function ProdutosPage() {
                 </div>
               </div>
 
-              <div className="mt-5 flex items-center gap-2">
+              <div className="mt-5 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setSelected(produto)}
@@ -228,6 +230,25 @@ export default function ProdutosPage() {
                   <Pencil className="mr-1.5 h-4 w-4" />
                   Editar
                 </button>
+
+                {produto.fichaTecnica ? (
+                  <Link
+                    href="/ficha-tecnica"
+                    className="inline-flex items-center justify-center rounded-2xl bg-violet-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-600"
+                  >
+                    <Link2 className="mr-1.5 h-4 w-4" />
+                    Ver Ficha
+                  </Link>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => alert('Esse produto ainda não possui ficha técnica cadastrada.')}
+                    className="inline-flex items-center justify-center rounded-2xl bg-amber-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-amber-600"
+                  >
+                    <ClipboardList className="mr-1.5 h-4 w-4" />
+                    Criar Ficha
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -308,6 +329,32 @@ export default function ProdutosPage() {
                     {item}
                   </span>
                 ))}
+              </div>
+            </div>
+
+            <div className="mt-4 erp-card p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Integração industrial
+              </p>
+              <div className="mt-3">
+                {selected.fichaTecnica ? (
+                  <Link
+                    href="/ficha-tecnica"
+                    className="inline-flex items-center justify-center rounded-2xl bg-violet-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-600"
+                  >
+                    <Link2 className="mr-2 h-4 w-4" />
+                    Abrir ficha técnica
+                  </Link>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => alert('Esse produto ainda precisa de ficha técnica para integrar com produção e estoque.')}
+                    className="inline-flex items-center justify-center rounded-2xl bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-600"
+                  >
+                    <ClipboardList className="mr-2 h-4 w-4" />
+                    Produto sem ficha técnica
+                  </button>
+                )}
               </div>
             </div>
           </div>
