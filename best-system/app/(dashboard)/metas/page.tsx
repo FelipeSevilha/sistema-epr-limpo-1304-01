@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Target,
   TrendingUp,
@@ -9,7 +9,17 @@ import {
   ChevronDown,
   CircleCheck,
   Clock3,
+  BadgeDollarSign,
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+
+type Pedido = {
+  id: string;
+  cliente_nome?: string | null;
+  valor?: number | null;
+  status?: string | null;
+  created_at?: string | null;
+};
 
 type MetaCard = {
   id: string;
@@ -28,23 +38,33 @@ const metasBase: MetaCard[] = [
     titulo: 'Meta de faturamento',
     periodo: 'Próximos 3 meses',
     meta: 150000,
-    realizado: 118500,
+    realizado: 0,
     categoria: 'Financeiro',
     responsavel: 'Diretoria',
     status: 'Em andamento',
   },
   {
     id: '2',
-    titulo: 'Meta comercial por vendedor',
-    periodo: 'Próximos 6 meses',
-    meta: 280000,
-    realizado: 164000,
+    titulo: 'Meta comercial Felipe',
+    periodo: 'Próximos 3 meses',
+    meta: 90000,
+    realizado: 0,
     categoria: 'Vendas',
-    responsavel: 'Equipe comercial',
+    responsavel: 'Felipe Sevilha',
     status: 'Em andamento',
   },
   {
     id: '3',
+    titulo: 'Meta comercial Wanessa',
+    periodo: 'Próximos 3 meses',
+    meta: 75000,
+    realizado: 0,
+    categoria: 'Vendas',
+    responsavel: 'Wanessa Castro',
+    status: 'Em andamento',
+  },
+  {
+    id: '4',
     titulo: 'Meta anual da operação',
     periodo: '1 ano',
     meta: 650000,
@@ -53,16 +73,6 @@ const metasBase: MetaCard[] = [
     responsavel: 'Gestão',
     status: 'Planejada',
   },
-  {
-    id: '4',
-    titulo: 'Redução de desperdício',
-    periodo: 'Próximos 3 meses',
-    meta: 12,
-    realizado: 9,
-    categoria: 'Produção',
-    responsavel: 'Chão de fábrica',
-    status: 'Em andamento',
-  },
 ];
 
 const fmt = (v: number) =>
@@ -70,19 +80,76 @@ const fmt = (v: number) =>
 
 export default function MetasPage() {
   const [periodo, setPeriodo] = useState('Todos');
+  const [pedidos, setPedidos] = useState<Pedido[]>([]);
+
+  useEffect(() => {
+    async function fetchPedidos() {
+      const { data } = await supabase.from('pedidos').select('*').order('created_at', { ascending: false });
+      setPedidos((data as Pedido[]) || []);
+    }
+
+    fetchPedidos();
+  }, []);
 
   const periodos = ['Todos', 'Próximos 3 meses', 'Próximos 6 meses', '1 ano'];
 
+  const metasComRealizado = useMemo(() => {
+    const faturamentoTotal = pedidos.reduce((sum, p) => sum + Number(p.valor || 0), 0);
+
+    return metasBase.map((meta) => {
+      if (meta.categoria === 'Financeiro') {
+        const realizado = faturamentoTotal;
+        return {
+          ...meta,
+          realizado,
+          status: realizado >= meta.meta ? 'Concluída' : 'Em andamento',
+        };
+      }
+
+      if (meta.responsavel === 'Felipe Sevilha') {
+        const realizado = faturamentoTotal * 0.55;
+        return {
+          ...meta,
+          realizado,
+          status: realizado >= meta.meta ? 'Concluída' : 'Em andamento',
+        };
+      }
+
+      if (meta.responsavel === 'Wanessa Castro') {
+        const realizado = faturamentoTotal * 0.45;
+        return {
+          ...meta,
+          realizado,
+          status: realizado >= meta.meta ? 'Concluída' : 'Em andamento',
+        };
+      }
+
+      return meta;
+    });
+  }, [pedidos]);
+
   const filtered = useMemo(() => {
-    return metasBase.filter((meta) => periodo === 'Todos' || meta.periodo === periodo);
-  }, [periodo]);
+    return metasComRealizado.filter((meta) => periodo === 'Todos' || meta.periodo === periodo);
+  }, [periodo, metasComRealizado]);
 
   const stats = {
-    total: metasBase.length,
-    andamento: metasBase.filter((m) => m.status === 'Em andamento').length,
-    planejadas: metasBase.filter((m) => m.status === 'Planejada').length,
-    concluidas: metasBase.filter((m) => m.status === 'Concluída').length,
+    total: metasComRealizado.length,
+    andamento: metasComRealizado.filter((m) => m.status === 'Em andamento').length,
+    planejadas: metasComRealizado.filter((m) => m.status === 'Planejada').length,
+    concluidas: metasComRealizado.filter((m) => m.status === 'Concluída').length,
   };
+
+  const rankingVendedores = useMemo(() => {
+    return metasComRealizado
+      .filter((m) => m.categoria === 'Vendas')
+      .map((m) => ({
+        nome: m.responsavel,
+        meta: m.meta,
+        realizado: m.realizado,
+        percentual: m.meta > 0 ? (m.realizado / m.meta) * 100 : 0,
+      }))
+      .sort((a, b) => b.percentual - a.percentual);
+  }, [metasComRealizado]);
 
   return (
     <div className="space-y-6">
@@ -155,8 +222,6 @@ export default function MetasPage() {
           const percentual =
             meta.meta > 0 ? Math.min((meta.realizado / meta.meta) * 100, 100) : 0;
 
-          const isPercentual = meta.categoria === 'Produção';
-
           return (
             <div key={meta.id} className="erp-card p-5">
               <div className="mb-4 flex items-start justify-between gap-4">
@@ -189,14 +254,14 @@ export default function MetasPage() {
                 <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-950">
                   <p className="text-xs text-slate-500 dark:text-slate-400">Meta</p>
                   <p className="mt-1 text-lg font-bold text-slate-900 dark:text-white">
-                    {isPercentual ? `${meta.meta}%` : fmt(meta.meta)}
+                    {fmt(meta.meta)}
                   </p>
                 </div>
 
                 <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-950">
                   <p className="text-xs text-slate-500 dark:text-slate-400">Realizado</p>
                   <p className="mt-1 text-lg font-bold text-slate-900 dark:text-white">
-                    {isPercentual ? `${meta.realizado}%` : fmt(meta.realizado)}
+                    {fmt(meta.realizado)}
                   </p>
                 </div>
               </div>
@@ -230,6 +295,62 @@ export default function MetasPage() {
             </div>
           );
         })}
+      </section>
+
+      <section className="erp-card p-5">
+        <div className="mb-5 flex items-center gap-2">
+          <BadgeDollarSign className="h-5 w-5 text-violet-500" />
+          <div>
+            <h2 className="erp-section-title">Ranking por vendedor</h2>
+            <p className="erp-section-subtitle">Comparativo de meta x realizado</p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          {rankingVendedores.map((item) => (
+            <div
+              key={item.nome}
+              className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/70"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-slate-900 dark:text-white">{item.nome}</p>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                    Meta: {fmt(item.meta)}
+                  </p>
+                </div>
+
+                <span
+                  className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                    item.percentual >= 100
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                      : item.percentual >= 70
+                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
+                      : 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300'
+                  }`}
+                >
+                  {item.percentual.toFixed(1)}%
+                </span>
+              </div>
+
+              <div className="mt-4">
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="text-slate-600 dark:text-slate-300">Realizado</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">
+                    {fmt(item.realizado)}
+                  </span>
+                </div>
+
+                <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500"
+                    style={{ width: `${Math.min(item.percentual, 100)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </section>
     </div>
   );
