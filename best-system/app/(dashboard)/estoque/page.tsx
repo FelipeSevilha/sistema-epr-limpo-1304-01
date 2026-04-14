@@ -13,6 +13,7 @@ import {
   ShieldAlert,
   CircleDollarSign,
   Factory,
+  ShoppingCart,
 } from 'lucide-react';
 import { supabase, EstoqueItem as EstoqueItemDB } from '@/lib/supabase';
 import EstoqueItemForm, { EstoqueItem } from '@/components/estoque/EstoqueItemForm';
@@ -59,7 +60,11 @@ function isRelacionadoProducao(categoria: string, item: string) {
     texto.includes('bopp') ||
     texto.includes('capa') ||
     texto.includes('miolo') ||
-    texto.includes('impress')
+    texto.includes('impress') ||
+    texto.includes('toner') ||
+    texto.includes('espiral') ||
+    texto.includes('verniz') ||
+    texto.includes('lamin')
   );
 }
 
@@ -113,6 +118,9 @@ export default function EstoquePage() {
   const criticosProducao = lista.filter(
     (i) => i.status === 'Crítico' && isRelacionadoProducao(i.categoria, i.item)
   ).length;
+  const baixosCompra = lista.filter(
+    (i) => (i.status === 'Crítico' || i.status === 'Baixo') && isRelacionadoProducao(i.categoria, i.item)
+  ).length;
 
   const handleSave = async (data: Omit<EstoqueItem, 'id' | 'status'>) => {
     const payload = {
@@ -165,10 +173,12 @@ export default function EstoquePage() {
 
   return (
     <div className="space-y-6">
-      <section className="grid grid-cols-2 gap-4 xl:grid-cols-5">
+      <section className="grid grid-cols-2 gap-4 xl:grid-cols-6">
         <div className="erp-card p-5">
           <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Itens cadastrados</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Itens cadastrados
+            </p>
             <Boxes className="h-4 w-4 text-sky-500" />
           </div>
           <p className="text-3xl font-bold text-slate-900 dark:text-white">{totalItens}</p>
@@ -176,7 +186,9 @@ export default function EstoquePage() {
 
         <div className="erp-card p-5">
           <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Estoque baixo</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Estoque baixo
+            </p>
             <AlertTriangle className="h-4 w-4 text-amber-500" />
           </div>
           <p className="text-3xl font-bold text-slate-900 dark:text-white">{baixos}</p>
@@ -184,7 +196,9 @@ export default function EstoquePage() {
 
         <div className="erp-card p-5">
           <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Críticos</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Críticos
+            </p>
             <ShieldAlert className="h-4 w-4 text-red-500" />
           </div>
           <p className="text-3xl font-bold text-slate-900 dark:text-white">{criticos}</p>
@@ -192,7 +206,9 @@ export default function EstoquePage() {
 
         <div className="erp-card p-5">
           <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Críticos p/ produção</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Críticos p/ produção
+            </p>
             <Factory className="h-4 w-4 text-violet-500" />
           </div>
           <p className="text-3xl font-bold text-slate-900 dark:text-white">{criticosProducao}</p>
@@ -200,7 +216,19 @@ export default function EstoquePage() {
 
         <div className="erp-card p-5">
           <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Valor estimado</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Itens para compra
+            </p>
+            <ShoppingCart className="h-4 w-4 text-cyan-500" />
+          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{baixosCompra}</p>
+        </div>
+
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Valor estimado
+            </p>
             <CircleDollarSign className="h-4 w-4 text-emerald-500" />
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">{fmt(valorTotal)}</p>
@@ -216,7 +244,7 @@ export default function EstoquePage() {
                 Atenção: existem itens críticos ligados à produção
               </h3>
               <p className="mt-1 text-sm text-red-600 dark:text-red-400">
-                Alguns materiais importantes para fabricação estão em nível crítico. Isso pode travar ordens de produção.
+                Alguns materiais importantes para fabricação estão em nível crítico e já impactam compras.
               </p>
             </div>
           </div>
@@ -260,10 +288,23 @@ export default function EstoquePage() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1180px] text-sm">
+          <table className="w-full min-w-[1280px] text-sm">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-900/60">
-                {['Item', 'Categoria', 'Quantidade', 'Unidade', 'Mínimo', 'Fornecedor', 'Valor Unit.', 'Valor Total', 'Status', 'Produção', 'Ações'].map((h) => (
+                {[
+                  'Item',
+                  'Categoria',
+                  'Quantidade',
+                  'Unidade',
+                  'Mínimo',
+                  'Fornecedor',
+                  'Valor Unit.',
+                  'Valor Total',
+                  'Status',
+                  'Produção',
+                  'Compra',
+                  'Ações',
+                ].map((h) => (
                   <th key={h} className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     {h}
                   </th>
@@ -274,11 +315,14 @@ export default function EstoquePage() {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filtered.map((e) => {
                 const ligadoProducao = isRelacionadoProducao(e.categoria, e.item);
+                const precisaCompra = e.status === 'Crítico' || e.status === 'Baixo';
 
                 return (
                   <tr
                     key={e.id}
-                    className={`transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50 ${e.status === 'Crítico' ? 'bg-red-50/40 dark:bg-red-500/5' : ''}`}
+                    className={`transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50 ${
+                      e.status === 'Crítico' ? 'bg-red-50/40 dark:bg-red-500/5' : ''
+                    }`}
                   >
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-3">
@@ -312,7 +356,13 @@ export default function EstoquePage() {
                       </span>
                     </td>
 
-                    <td className={`px-5 py-3 font-bold ${e.status === 'Crítico' ? 'text-red-600 dark:text-red-400' : e.status === 'Baixo' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-900 dark:text-white'}`}>
+                    <td className={`px-5 py-3 font-bold ${
+                      e.status === 'Crítico'
+                        ? 'text-red-600 dark:text-red-400'
+                        : e.status === 'Baixo'
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : 'text-slate-900 dark:text-white'
+                    }`}>
                       {e.quantidade.toLocaleString('pt-BR')}
                     </td>
 
@@ -336,6 +386,22 @@ export default function EstoquePage() {
                       ) : (
                         <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                           Geral
+                        </span>
+                      )}
+                    </td>
+
+                    <td className="px-5 py-3">
+                      {precisaCompra ? (
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                          e.status === 'Crítico'
+                            ? 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300'
+                            : 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
+                        }`}>
+                          Sugerida
+                        </span>
+                      ) : (
+                        <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                          Ok
                         </span>
                       )}
                     </td>
@@ -376,7 +442,7 @@ export default function EstoquePage() {
 
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400">
+                  <td colSpan={12} className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400">
                     Nenhum item de estoque encontrado.
                   </td>
                 </tr>
