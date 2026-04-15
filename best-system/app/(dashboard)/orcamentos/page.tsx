@@ -89,8 +89,17 @@ type FormData = {
   itens: OrcamentoItem[];
 };
 
+const EMPRESA_NOME = "Gráfica D'Sevilha";
+const EMPRESA_CNPJ = '04.707.537/0002-28';
+const EMPRESA_WHATSAPP_RAW = '11984194340';
+const EMPRESA_WHATSAPP_FORMATADO = '(11) 98419-4340';
+const LOGO_PUBLIC_PATH = '/logo-dsevilha.png';
+
 const initialItem = (): OrcamentoItem => ({
-  id: crypto.randomUUID(),
+  id:
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`,
   descricao: '',
   quantidade: 1,
   valor_unitario: 0,
@@ -121,15 +130,6 @@ function formatDate(value?: string | null) {
   const d = new Date(`${value}`.includes('T') ? value : `${value}T00:00:00`);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('pt-BR');
-}
-
-function nextNumero(orcamentos: Orcamento[]) {
-  const numeros = orcamentos
-    .map((o) => Number(String(o.numero || '').replace(/\D/g, '')))
-    .filter((n) => !Number.isNaN(n) && n > 0);
-
-  const max = numeros.length ? Math.max(...numeros) : 0;
-  return `ORC-${String(max + 1).padStart(4, '0')}`;
 }
 
 function nextPedidoNumero(pedidos: Pedido[]) {
@@ -166,7 +166,10 @@ function parseItens(orc: Orcamento): OrcamentoItem[] {
       descricao: item.descricao || '',
       quantidade: Number(item.quantidade || 0),
       valor_unitario: Number(item.valor_unitario || 0),
-      total: Number(item.total || Number(item.quantidade || 0) * Number(item.valor_unitario || 0)),
+      total: Number(
+        item.total ||
+          Number(item.quantidade || 0) * Number(item.valor_unitario || 0)
+      ),
     }));
   }
 
@@ -179,11 +182,14 @@ function parseItens(orc: Orcamento): OrcamentoItem[] {
           descricao: item.descricao || '',
           quantidade: Number(item.quantidade || 0),
           valor_unitario: Number(item.valor_unitario || 0),
-          total: Number(item.total || Number(item.quantidade || 0) * Number(item.valor_unitario || 0)),
+          total: Number(
+            item.total ||
+              Number(item.quantidade || 0) * Number(item.valor_unitario || 0)
+          ),
         }));
       }
     } catch {
-      // ignora e usa fallback
+      // fallback abaixo
     }
   }
 
@@ -213,6 +219,66 @@ function sanitizeHtml(text: string) {
     .replaceAll("'", '&#039;');
 }
 
+function toDateParts(value?: string | null) {
+  const d = value ? new Date(value) : new Date();
+  if (Number.isNaN(d.getTime())) {
+    const now = new Date();
+    return {
+      year: String(now.getFullYear()),
+      monthDay: `${String(now.getMonth() + 1).padStart(2, '0')}${String(
+        now.getDate()
+      ).padStart(2, '0')}`,
+      dateKey: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+        2,
+        '0'
+      )}-${String(now.getDate()).padStart(2, '0')}`,
+    };
+  }
+
+  return {
+    year: String(d.getFullYear()),
+    monthDay: `${String(d.getMonth() + 1).padStart(2, '0')}${String(
+      d.getDate()
+    ).padStart(2, '0')}`,
+    dateKey: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+      2,
+      '0'
+    )}-${String(d.getDate()).padStart(2, '0')}`,
+  };
+}
+
+function nextNumero(orcamentos: Orcamento[]) {
+  const now = new Date();
+  const { year, monthDay, dateKey } = toDateParts(now.toISOString());
+  const prefix = `${year}.${monthDay}-`;
+
+  const sameDay = orcamentos.filter((o) => {
+    if (o.numero?.startsWith(prefix)) return true;
+    if (!o.created_at) return false;
+    return toDateParts(o.created_at).dateKey === dateKey;
+  });
+
+  const lastSeq = sameDay.reduce((max, o) => {
+    const numero = String(o.numero || '');
+    const parts = numero.split('-');
+    const seq = Number(parts[1] || 0);
+    return Number.isFinite(seq) && seq > max ? seq : max;
+  }, 0);
+
+  return `${prefix}${String(lastSeq + 1).padStart(2, '0')}`;
+}
+
+function buildWhatsappApprovalLink(orc: Orcamento) {
+  const mensagem = [
+    `Olá, quero aprovar o orçamento ${orc.numero || ''}.`,
+    `Cliente: ${orc.cliente_nome || ''}`,
+    `Valor: ${fmt(Number(orc.valor || 0))}`,
+  ].join(' ');
+  return `https://wa.me/${EMPRESA_WHATSAPP_RAW}?text=${encodeURIComponent(
+    mensagem
+  )}`;
+}
+
 export default function OrcamentosPage() {
   const [orcamentos, setOrcamentos] = useState<Orcamento[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -234,8 +300,14 @@ export default function OrcamentosPage() {
       setLoading(true);
 
       const [orcRes, cliRes] = await Promise.all([
-        supabase.from('orcamentos').select('*').order('created_at', { ascending: false }),
-        supabase.from('clientes').select('*').order('razao_social', { ascending: true }),
+        supabase
+          .from('orcamentos')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('clientes')
+          .select('*')
+          .order('razao_social', { ascending: true }),
       ]);
 
       setOrcamentos((orcRes.data as Orcamento[]) || []);
@@ -255,12 +327,16 @@ export default function OrcamentosPage() {
   const filtrados = useMemo(() => {
     return orcamentos.filter((orc) => {
       const texto = search.toLowerCase();
+      const itens = parseItens(orc);
+      const itensTexto = itens.map((item) => item.descricao).join(' ').toLowerCase();
+
       return (
         String(orc.numero || '').toLowerCase().includes(texto) ||
         String(orc.cliente_nome || '').toLowerCase().includes(texto) ||
         String(orc.produto || '').toLowerCase().includes(texto) ||
         String(orc.status || '').toLowerCase().includes(texto) ||
-        String(orc.vendedor || '').toLowerCase().includes(texto)
+        String(orc.vendedor || '').toLowerCase().includes(texto) ||
+        itensTexto.includes(texto)
       );
     });
   }, [orcamentos, search]);
@@ -274,7 +350,10 @@ export default function OrcamentosPage() {
       ['Aprovado', 'Convertido'].includes(o.status || '')
     ).length;
     const perdidos = orcamentos.filter((o) => (o.status || '') === 'Perdido').length;
-    const valorTotal = orcamentos.reduce((sum, o) => sum + Number(o.valor || 0), 0);
+    const valorTotal = orcamentos.reduce(
+      (sum, o) => sum + Number(o.valor || 0),
+      0
+    );
 
     return { total, abertos, aprovados, perdidos, valorTotal };
   }, [orcamentos]);
@@ -289,7 +368,11 @@ export default function OrcamentosPage() {
         const razao = (c.razao_social || '').toLowerCase();
         const fantasia = (c.nome_fantasia || '').toLowerCase();
         const email = (c.email_comercial || '').toLowerCase();
-        return razao.includes(termo) || fantasia.includes(termo) || email.includes(termo);
+        return (
+          razao.includes(termo) ||
+          fantasia.includes(termo) ||
+          email.includes(termo)
+        );
       })
       .slice(0, 8);
   }, [clientes, clienteSearch]);
@@ -302,7 +385,11 @@ export default function OrcamentosPage() {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
-  function updateItem(itemId: string, field: keyof OrcamentoItem, value: string | number) {
+  function updateItem(
+    itemId: string,
+    field: keyof OrcamentoItem,
+    value: string | number
+  ) {
     setForm((prev) => {
       const itens = prev.itens.map((item) => {
         if (item.id !== itemId) return item;
@@ -393,7 +480,10 @@ export default function OrcamentosPage() {
     }
 
     const itensValidos = form.itens.filter(
-      (item) => item.descricao.trim() && Number(item.quantidade) > 0 && Number(item.valor_unitario) >= 0
+      (item) =>
+        item.descricao.trim() &&
+        Number(item.quantidade) > 0 &&
+        Number(item.valor_unitario) >= 0
     );
 
     if (itensValidos.length === 0) {
@@ -419,8 +509,14 @@ export default function OrcamentosPage() {
           total: Number(item.total || 0),
         }));
 
-      const quantidadeTotal = itens.reduce((sum, item) => sum + Number(item.quantidade || 0), 0);
-      const valorTotal = itens.reduce((sum, item) => sum + Number(item.total || 0), 0);
+      const quantidadeTotal = itens.reduce(
+        (sum, item) => sum + Number(item.quantidade || 0),
+        0
+      );
+      const valorTotal = itens.reduce(
+        (sum, item) => sum + Number(item.total || 0),
+        0
+      );
       const produtoPrincipal = itens[0]?.descricao || '';
 
       const payload = {
@@ -468,7 +564,9 @@ export default function OrcamentosPage() {
   }
 
   async function handleDelete(id: string) {
-    const confirmar = window.confirm('Deseja realmente excluir este orçamento?');
+    const confirmar = window.confirm(
+      'Deseja realmente excluir este orçamento?'
+    );
     if (!confirmar) return;
 
     try {
@@ -492,7 +590,10 @@ export default function OrcamentosPage() {
         payload.motivo_perda = '';
       }
 
-      const { error } = await supabase.from('orcamentos').update(payload).eq('id', id);
+      const { error } = await supabase
+        .from('orcamentos')
+        .update(payload)
+        .eq('id', id);
       if (error) throw error;
       fetchData();
     } catch (err: any) {
@@ -549,7 +650,7 @@ export default function OrcamentosPage() {
 
   function handleGerarPDF(orc: Orcamento) {
     const itens = parseItens(orc);
-    const popup = window.open('', '_blank', 'width=900,height=700');
+    const popup = window.open('', '_blank', 'width=1000,height=780');
 
     if (!popup) {
       alert('Permita pop-ups para gerar o PDF.');
@@ -557,6 +658,10 @@ export default function OrcamentosPage() {
     }
 
     const total = itens.reduce((sum, item) => sum + Number(item.total || 0), 0);
+    const approvalLink = buildWhatsappApprovalLink(orc);
+    const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(
+      `https://wa.me/${EMPRESA_WHATSAPP_RAW}`
+    )}`;
 
     const html = `
       <!DOCTYPE html>
@@ -565,152 +670,312 @@ export default function OrcamentosPage() {
           <meta charset="UTF-8" />
           <title>Orçamento ${sanitizeHtml(orc.numero || '')}</title>
           <style>
+            * {
+              box-sizing: border-box;
+            }
             body {
               font-family: Arial, Helvetica, sans-serif;
-              padding: 32px;
+              margin: 0;
+              padding: 24px;
               color: #111827;
+              background: #ffffff;
             }
-            .header {
+            .page {
+              max-width: 900px;
+              margin: 0 auto;
+            }
+            .top {
+              display: grid;
+              grid-template-columns: 1.3fr 1fr;
+              gap: 20px;
+              align-items: start;
+              margin-bottom: 18px;
+            }
+            .brand {
               display: flex;
-              justify-content: space-between;
-              align-items: flex-start;
-              margin-bottom: 24px;
+              gap: 14px;
+              align-items: center;
             }
-            .title {
-              font-size: 28px;
+            .brand img {
+              width: 72px;
+              height: 72px;
+              object-fit: contain;
+              border-radius: 12px;
+              background: #fff;
+            }
+            .brand-title {
+              font-size: 20px;
               font-weight: 700;
-              margin: 0 0 8px 0;
+              color: #111111;
+              margin: 0 0 4px 0;
             }
-            .muted {
-              color: #6b7280;
-              font-size: 13px;
+            .brand-sub {
+              font-size: 12px;
+              color: #4b5563;
               line-height: 1.5;
             }
-            .box {
+            .header-box {
+              border: 1px solid #e5e7eb;
+              border-radius: 16px;
+              padding: 14px;
+            }
+            .small-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 10px 16px;
+            }
+            .label {
+              font-size: 11px;
+              color: #6b7280;
+              text-transform: uppercase;
+              letter-spacing: 0.04em;
+              margin-bottom: 4px;
+            }
+            .value {
+              font-size: 14px;
+              color: #111827;
+              font-weight: 600;
+            }
+            .section {
               border: 1px solid #e5e7eb;
               border-radius: 16px;
               padding: 16px;
-              margin-bottom: 16px;
+              margin-top: 14px;
             }
-            .box h3 {
+            .section-title {
+              font-size: 13px;
+              font-weight: 700;
+              color: #111827;
+              text-transform: uppercase;
+              letter-spacing: 0.05em;
               margin: 0 0 12px 0;
-              font-size: 15px;
-            }
-            .grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 12px;
             }
             table {
               width: 100%;
               border-collapse: collapse;
-              margin-top: 12px;
             }
             th, td {
-              border: 1px solid #e5e7eb;
-              padding: 10px;
-              font-size: 13px;
-              text-align: left;
+              padding: 10px 8px;
+              border-bottom: 1px solid #e5e7eb;
+              font-size: 12px;
+              vertical-align: top;
             }
             th {
-              background: #f9fafb;
+              color: #6b7280;
+              text-transform: uppercase;
+              letter-spacing: 0.04em;
+              font-size: 11px;
+              text-align: left;
             }
             .right {
               text-align: right;
             }
-            .total {
-              margin-top: 16px;
+            .totals {
               display: flex;
               justify-content: flex-end;
+              margin-top: 12px;
+            }
+            .totals-box {
+              min-width: 240px;
+              background: #f9fafb;
+              border-radius: 14px;
+              padding: 14px 16px;
+            }
+            .total-line {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              font-size: 13px;
+              margin-bottom: 8px;
+            }
+            .total-line:last-child {
+              margin-bottom: 0;
+              padding-top: 8px;
+              border-top: 1px solid #d1d5db;
               font-size: 18px;
               font-weight: 700;
             }
-            .footer {
-              margin-top: 32px;
+            .bottom {
+              display: grid;
+              grid-template-columns: 1fr 180px;
+              gap: 18px;
+              align-items: start;
+              margin-top: 14px;
+            }
+            .qr-box {
+              border: 1px solid #e5e7eb;
+              border-radius: 16px;
+              padding: 12px;
+              text-align: center;
+            }
+            .qr-box img {
+              width: 100px;
+              height: 100px;
+            }
+            .qr-text {
+              margin-top: 8px;
+              font-size: 11px;
+              color: #4b5563;
+              line-height: 1.45;
+            }
+            .approve {
+              margin-top: 12px;
+              display: inline-block;
+              text-decoration: none;
+              background: #16a34a;
+              color: white !important;
+              padding: 10px 14px;
+              border-radius: 999px;
               font-size: 12px;
+              font-weight: 700;
+            }
+            .obs {
+              font-size: 12px;
+              color: #374151;
+              line-height: 1.6;
+              white-space: pre-wrap;
+            }
+            .footer {
+              margin-top: 18px;
+              font-size: 11px;
               color: #6b7280;
+              text-align: center;
             }
             @media print {
               body {
-                padding: 16px;
+                padding: 12px;
+              }
+              .approve {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
               }
             }
           </style>
         </head>
         <body>
-          <div class="header">
-            <div>
-              <h1 class="title">Orçamento ${sanitizeHtml(orc.numero || '')}</h1>
-              <div class="muted">
-                Data: ${sanitizeHtml(formatDate(orc.created_at))}<br/>
-                Validade: ${sanitizeHtml(formatDate(orc.validade))}
+          <div class="page">
+            <div class="top">
+              <div class="header-box">
+                <div class="brand">
+                  <img src="${sanitizeHtml(LOGO_PUBLIC_PATH)}" alt="Logo" />
+                  <div>
+                    <h1 class="brand-title">${sanitizeHtml(EMPRESA_NOME)}</h1>
+                    <div class="brand-sub">
+                      CNPJ: ${sanitizeHtml(EMPRESA_CNPJ)}<br />
+                      WhatsApp: ${sanitizeHtml(EMPRESA_WHATSAPP_FORMATADO)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="header-box">
+                <div class="small-grid">
+                  <div>
+                    <div class="label">Orçamento</div>
+                    <div class="value">${sanitizeHtml(orc.numero || '—')}</div>
+                  </div>
+                  <div>
+                    <div class="label">Data</div>
+                    <div class="value">${sanitizeHtml(formatDate(orc.created_at))}</div>
+                  </div>
+                  <div>
+                    <div class="label">Validade</div>
+                    <div class="value">${sanitizeHtml(formatDate(orc.validade))}</div>
+                  </div>
+                  <div>
+                    <div class="label">Vendedor</div>
+                    <div class="value">${sanitizeHtml(orc.vendedor || '—')}</div>
+                  </div>
+                </div>
               </div>
             </div>
-            <div class="muted" style="text-align:right;">
-              Status: ${sanitizeHtml(orc.status || '—')}<br/>
-              Vendedor: ${sanitizeHtml(orc.vendedor || '—')}<br/>
-              Origem: ${sanitizeHtml(orc.origem || '—')}
-            </div>
-          </div>
 
-          <div class="box">
-            <h3>Cliente</h3>
-            <div class="muted" style="font-size:14px;color:#111827;">
-              ${sanitizeHtml(orc.cliente_nome || '—')}
+            <div class="section">
+              <h2 class="section-title">Cliente</h2>
+              <div class="small-grid">
+                <div style="grid-column: span 2;">
+                  <div class="label">Nome</div>
+                  <div class="value">${sanitizeHtml(orc.cliente_nome || '—')}</div>
+                </div>
+              </div>
             </div>
-          </div>
 
-          <div class="box">
-            <h3>Itens do orçamento</h3>
-            <table>
-              <thead>
-                <tr>
-                  <th>Descrição</th>
-                  <th class="right">Quantidade</th>
-                  <th class="right">Valor unitário</th>
-                  <th class="right">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${itens
-                  .map(
-                    (item) => `
+            <div class="section">
+              <h2 class="section-title">Itens do orçamento</h2>
+              <table>
+                <thead>
                   <tr>
-                    <td>${sanitizeHtml(item.descricao)}</td>
-                    <td class="right">${sanitizeHtml(String(item.quantidade))}</td>
-                    <td class="right">${sanitizeHtml(fmt(item.valor_unitario))}</td>
-                    <td class="right">${sanitizeHtml(fmt(item.total))}</td>
+                    <th style="width: 46%;">Descrição</th>
+                    <th class="right" style="width: 14%;">Qtd</th>
+                    <th class="right" style="width: 20%;">Valor unit.</th>
+                    <th class="right" style="width: 20%;">Total</th>
                   </tr>
-                `
-                  )
-                  .join('')}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  ${itens
+                    .map(
+                      (item) => `
+                    <tr>
+                      <td>${sanitizeHtml(item.descricao)}</td>
+                      <td class="right">${sanitizeHtml(String(item.quantidade))}</td>
+                      <td class="right">${sanitizeHtml(fmt(item.valor_unitario))}</td>
+                      <td class="right">${sanitizeHtml(fmt(item.total))}</td>
+                    </tr>
+                  `
+                    )
+                    .join('')}
+                </tbody>
+              </table>
 
-            <div class="total">
-              Total geral: ${sanitizeHtml(fmt(total))}
+              <div class="totals">
+                <div class="totals-box">
+                  <div class="total-line">
+                    <span>Subtotal</span>
+                    <span>${sanitizeHtml(fmt(total))}</span>
+                  </div>
+                  <div class="total-line">
+                    <span>Total geral</span>
+                    <span>${sanitizeHtml(fmt(total))}</span>
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
 
-          <div class="box">
-            <h3>Observações</h3>
-            <div class="muted" style="font-size:14px;color:#111827;">
-              ${sanitizeHtml(orc.descricao || '')}<br/><br/>
-              ${sanitizeHtml(orc.observacoes || 'Sem observações.')}
+            <div class="bottom">
+              <div class="section" style="margin-top: 0;">
+                <h2 class="section-title">Descrição e observações</h2>
+                <div class="obs">${sanitizeHtml(orc.descricao || '')}</div>
+                <div class="obs" style="margin-top: 12px;">${sanitizeHtml(
+                  orc.observacoes || 'Sem observações.'
+                )}</div>
+              </div>
+
+              <div class="qr-box">
+                <img src="${sanitizeHtml(qrLink)}" alt="QR Code WhatsApp" />
+                <div class="qr-text">
+                  WhatsApp da gráfica<br />
+                  ${sanitizeHtml(EMPRESA_WHATSAPP_FORMATADO)}
+                </div>
+                <a class="approve" href="${sanitizeHtml(approvalLink)}" target="_blank" rel="noreferrer">
+                  Aprovar no WhatsApp
+                </a>
+              </div>
             </div>
-          </div>
 
-          <div class="footer">
-            Documento gerado pelo sistema de orçamentos.
-          </div>
+            <div class="footer">
+              Documento gerado pelo sistema de orçamentos • ${sanitizeHtml(
+                EMPRESA_NOME
+              )}
+            </div>
 
-          <script>
-            window.onload = function() {
-              setTimeout(function() {
-                window.print();
-              }, 300);
-            };
-          </script>
+            <script>
+              window.onload = function() {
+                setTimeout(function() {
+                  window.print();
+                }, 300);
+              };
+            </script>
+          </div>
         </body>
       </html>
     `;
@@ -738,7 +1003,9 @@ export default function OrcamentosPage() {
             </p>
             <FileText className="h-4 w-4 text-sky-500" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.total}</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">
+            {resumo.total}
+          </p>
         </div>
 
         <div className="erp-card p-5">
@@ -748,7 +1015,9 @@ export default function OrcamentosPage() {
             </p>
             <Clock3 className="h-4 w-4 text-amber-500" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.abertos}</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">
+            {resumo.abertos}
+          </p>
         </div>
 
         <div className="erp-card p-5">
@@ -758,7 +1027,9 @@ export default function OrcamentosPage() {
             </p>
             <CircleCheck className="h-4 w-4 text-emerald-500" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.aprovados}</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">
+            {resumo.aprovados}
+          </p>
         </div>
 
         <div className="erp-card p-5">
@@ -768,7 +1039,9 @@ export default function OrcamentosPage() {
             </p>
             <CircleX className="h-4 w-4 text-red-500" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.perdidos}</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">
+            {resumo.perdidos}
+          </p>
         </div>
 
         <div className="erp-card p-5">
@@ -778,7 +1051,9 @@ export default function OrcamentosPage() {
             </p>
             <DollarSign className="h-4 w-4 text-violet-500" />
           </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">{fmt(resumo.valorTotal)}</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
+            {fmt(resumo.valorTotal)}
+          </p>
         </div>
       </section>
 
@@ -878,7 +1153,11 @@ export default function OrcamentosPage() {
                     </td>
 
                     <td className="px-4 py-3">
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(orc.status)}`}>
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(
+                          orc.status
+                        )}`}
+                      >
                         {orc.status || '—'}
                       </span>
                     </td>
@@ -914,7 +1193,9 @@ export default function OrcamentosPage() {
 
                         <select
                           value={orc.status || 'Em aberto'}
-                          onChange={(e) => handleUpdateStatus(orc.id, e.target.value)}
+                          onChange={(e) =>
+                            handleUpdateStatus(orc.id, e.target.value)
+                          }
                           className="rounded-xl border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                         >
                           <option>Em aberto</option>
@@ -936,7 +1217,9 @@ export default function OrcamentosPage() {
                           title="Converter em pedido"
                         >
                           <Package className="mr-1.5 h-4 w-4" />
-                          {orc.status === 'Convertido' ? 'Convertido' : 'Converter'}
+                          {orc.status === 'Convertido'
+                            ? 'Convertido'
+                            : 'Converter'}
                         </button>
 
                         <button
@@ -970,7 +1253,10 @@ export default function OrcamentosPage() {
 
       {selected && (
         <div className="fixed inset-0 z-40 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSelected(null)} />
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setSelected(null)}
+          />
           <div className="relative z-10 w-full max-w-5xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
@@ -996,30 +1282,42 @@ export default function OrcamentosPage() {
 
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <div className="erp-card p-4">
-                <p className="text-xs text-slate-500 dark:text-slate-400">Itens</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Itens
+                </p>
                 <p className="mt-1 font-semibold text-slate-900 dark:text-white">
                   {parseItens(selected).length}
                 </p>
               </div>
 
               <div className="erp-card p-4">
-                <p className="text-xs text-slate-500 dark:text-slate-400">Valor total</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Valor total
+                </p>
                 <p className="mt-1 font-semibold text-slate-900 dark:text-white">
                   {fmt(Number(selected.valor || 0))}
                 </p>
               </div>
 
               <div className="erp-card p-4">
-                <p className="text-xs text-slate-500 dark:text-slate-400">Validade</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Validade
+                </p>
                 <p className="mt-1 font-semibold text-slate-900 dark:text-white">
                   {formatDate(selected.validade)}
                 </p>
               </div>
 
               <div className="erp-card p-4">
-                <p className="text-xs text-slate-500 dark:text-slate-400">Status</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Status
+                </p>
                 <div className="mt-2">
-                  <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(selected.status)}`}>
+                  <span
+                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(
+                      selected.status
+                    )}`}
+                  >
                     {selected.status || '—'}
                   </span>
                 </div>
@@ -1037,20 +1335,24 @@ export default function OrcamentosPage() {
                 <table className="w-full min-w-[900px] text-sm">
                   <thead>
                     <tr className="bg-slate-50 dark:bg-slate-900/60">
-                      {['Descrição', 'Quantidade', 'Valor unitário', 'Total'].map((h) => (
-                        <th
-                          key={h}
-                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
-                        >
-                          {h}
-                        </th>
-                      ))}
+                      {['Descrição', 'Quantidade', 'Valor unitário', 'Total'].map(
+                        (h) => (
+                          <th
+                            key={h}
+                            className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+                          >
+                            {h}
+                          </th>
+                        )
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {parseItens(selected).map((item) => (
                       <tr key={item.id}>
-                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{item.descricao}</td>
+                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                          {item.descricao}
+                        </td>
                         <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
                           {Number(item.quantidade || 0).toLocaleString('pt-BR')}
                         </td>
@@ -1073,10 +1375,22 @@ export default function OrcamentosPage() {
                   Informações comerciais
                 </h4>
                 <div className="space-y-2 text-sm text-slate-700 dark:text-slate-200">
-                  <p><span className="font-semibold">Vendedor:</span> {selected.vendedor || '—'}</p>
-                  <p><span className="font-semibold">Origem:</span> {selected.origem || '—'}</p>
-                  <p><span className="font-semibold">Validade:</span> {formatDate(selected.validade)}</p>
-                  <p><span className="font-semibold">Criado em:</span> {formatDate(selected.created_at)}</p>
+                  <p>
+                    <span className="font-semibold">Vendedor:</span>{' '}
+                    {selected.vendedor || '—'}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Origem:</span>{' '}
+                    {selected.origem || '—'}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Validade:</span>{' '}
+                    {formatDate(selected.validade)}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Criado em:</span>{' '}
+                    {formatDate(selected.created_at)}
+                  </p>
                 </div>
               </div>
 
@@ -1085,9 +1399,18 @@ export default function OrcamentosPage() {
                   Motivo da perda / observações
                 </h4>
                 <div className="space-y-3 text-sm text-slate-700 dark:text-slate-200">
-                  <p><span className="font-semibold">Motivo da perda:</span> {selected.motivo_perda || '—'}</p>
-                  <p><span className="font-semibold">Descrição geral:</span> {selected.descricao || '—'}</p>
-                  <p><span className="font-semibold">Observações:</span> {selected.observacoes || '—'}</p>
+                  <p>
+                    <span className="font-semibold">Motivo da perda:</span>{' '}
+                    {selected.motivo_perda || '—'}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Descrição geral:</span>{' '}
+                    {selected.descricao || '—'}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Observações:</span>{' '}
+                    {selected.observacoes || '—'}
+                  </p>
                 </div>
               </div>
             </div>
@@ -1115,10 +1438,16 @@ export default function OrcamentosPage() {
                 type="button"
                 onClick={() => handleConverter(selected)}
                 disabled={selected.status === 'Convertido'}
-                className={`erp-button-primary ${selected.status === 'Convertido' ? 'cursor-not-allowed opacity-70' : ''}`}
+                className={`erp-button-primary ${
+                  selected.status === 'Convertido'
+                    ? 'cursor-not-allowed opacity-70'
+                    : ''
+                }`}
               >
                 <CheckCircle2 className="mr-2 h-4 w-4" />
-                {selected.status === 'Convertido' ? 'Já convertido' : 'Converter em pedido'}
+                {selected.status === 'Convertido'
+                  ? 'Já convertido'
+                  : 'Converter em pedido'}
               </button>
             </div>
           </div>
@@ -1127,7 +1456,10 @@ export default function OrcamentosPage() {
 
       {drawerOpen && (
         <div className="fixed inset-0 z-50 flex">
-          <div className="flex-1 bg-black/40 backdrop-blur-sm" onClick={closeDrawer} />
+          <div
+            className="flex-1 bg-black/40 backdrop-blur-sm"
+            onClick={closeDrawer}
+          />
 
           <div className="h-full w-full max-w-[900px] overflow-y-auto border-l border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950">
             <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-6 py-5 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
@@ -1188,28 +1520,33 @@ export default function OrcamentosPage() {
                       />
                     </div>
 
-                    {showClienteList && clienteSearch.trim() && clientesFiltrados.length > 0 && (
-                      <div className="mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                        {clientesFiltrados.map((cliente) => {
-                          const nome = cliente.razao_social || cliente.nome_fantasia || 'Cliente';
-                          return (
-                            <button
-                              key={cliente.id}
-                              type="button"
-                              onClick={() => selecionarCliente(cliente)}
-                              className="block w-full border-b border-slate-100 px-4 py-3 text-left text-sm text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800 last:border-b-0"
-                            >
-                              <div className="font-medium">{nome}</div>
-                              {cliente.email_comercial ? (
-                                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                                  {cliente.email_comercial}
-                                </div>
-                              ) : null}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+                    {showClienteList &&
+                      clienteSearch.trim() &&
+                      clientesFiltrados.length > 0 && (
+                        <div className="mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                          {clientesFiltrados.map((cliente) => {
+                            const nome =
+                              cliente.razao_social ||
+                              cliente.nome_fantasia ||
+                              'Cliente';
+                            return (
+                              <button
+                                key={cliente.id}
+                                type="button"
+                                onClick={() => selecionarCliente(cliente)}
+                                className="block w-full border-b border-slate-100 px-4 py-3 text-left text-sm text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800 last:border-b-0"
+                              >
+                                <div className="font-medium">{nome}</div>
+                                {cliente.email_comercial ? (
+                                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                    {cliente.email_comercial}
+                                  </div>
+                                ) : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                   </div>
 
                   <div className="md:col-span-2">
@@ -1288,7 +1625,9 @@ export default function OrcamentosPage() {
                       </label>
                       <input
                         value={form.motivo_perda}
-                        onChange={(e) => updateForm('motivo_perda', e.target.value)}
+                        onChange={(e) =>
+                          updateForm('motivo_perda', e.target.value)
+                        }
                         className="erp-input w-full"
                         placeholder="Preço, prazo, concorrência..."
                       />
@@ -1302,7 +1641,9 @@ export default function OrcamentosPage() {
                     <textarea
                       rows={4}
                       value={form.observacoes}
-                      onChange={(e) => updateForm('observacoes', e.target.value)}
+                      onChange={(e) =>
+                        updateForm('observacoes', e.target.value)
+                      }
                       className="erp-input w-full"
                       placeholder="Observações internas do orçamento"
                     />
@@ -1359,7 +1700,9 @@ export default function OrcamentosPage() {
                           </label>
                           <input
                             value={item.descricao}
-                            onChange={(e) => updateItem(item.id, 'descricao', e.target.value)}
+                            onChange={(e) =>
+                              updateItem(item.id, 'descricao', e.target.value)
+                            }
                             className="erp-input w-full"
                             placeholder="Ex: Cartão de visita 4x4"
                           />
@@ -1373,7 +1716,13 @@ export default function OrcamentosPage() {
                             type="number"
                             min="1"
                             value={item.quantidade}
-                            onChange={(e) => updateItem(item.id, 'quantidade', Number(e.target.value))}
+                            onChange={(e) =>
+                              updateItem(
+                                item.id,
+                                'quantidade',
+                                Number(e.target.value)
+                              )
+                            }
                             className="erp-input w-full"
                           />
                         </div>
@@ -1387,7 +1736,13 @@ export default function OrcamentosPage() {
                             min="0"
                             step="0.01"
                             value={item.valor_unitario}
-                            onChange={(e) => updateItem(item.id, 'valor_unitario', Number(e.target.value))}
+                            onChange={(e) =>
+                              updateItem(
+                                item.id,
+                                'valor_unitario',
+                                Number(e.target.value)
+                              )
+                            }
                             className="erp-input w-full"
                           />
                         </div>
@@ -1407,7 +1762,9 @@ export default function OrcamentosPage() {
 
                 <div className="mt-5 flex justify-end">
                   <div className="rounded-2xl bg-slate-100 px-4 py-3 text-right dark:bg-slate-800">
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Total do orçamento</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Total do orçamento
+                    </p>
                     <p className="mt-1 text-xl font-bold text-slate-900 dark:text-white">
                       {fmt(totalForm)}
                     </p>
@@ -1430,10 +1787,16 @@ export default function OrcamentosPage() {
                   type="button"
                   onClick={handleSave}
                   disabled={saving}
-                  className={`erp-button-primary ${saving ? 'cursor-not-allowed opacity-70' : ''}`}
+                  className={`erp-button-primary ${
+                    saving ? 'cursor-not-allowed opacity-70' : ''
+                  }`}
                 >
                   <Save className="mr-2 h-4 w-4" />
-                  {saving ? 'Salvando...' : editing ? 'Atualizar Orçamento' : 'Cadastrar Orçamento'}
+                  {saving
+                    ? 'Salvando...'
+                    : editing
+                    ? 'Atualizar Orçamento'
+                    : 'Cadastrar Orçamento'}
                 </button>
               </div>
             </div>
