@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { supabase, ContaPagar, ContaReceber, Cliente } from '@/lib/supabase';
+import { supabase, ContaPagar, ContaReceber, Cliente, Pedido } from '@/lib/supabase';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -28,13 +28,17 @@ import {
   X,
   Save,
   Search,
+  CalendarRange,
+  BadgeDollarSign,
+  Users,
+  ReceiptText,
 } from 'lucide-react';
 
 const fmt = (v: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
 
 const fmtShort = (v: number) => {
-  if (v >= 1000) return `R$${(v / 1000).toFixed(0)}k`;
+  if (Math.abs(v) >= 1000) return `R$${(v / 1000).toFixed(0)}k`;
   return fmt(v);
 };
 
@@ -48,6 +52,9 @@ type ContaPagarForm = {
   valor: string;
   vencimento: string;
   status: 'Pendente' | 'Pago' | 'Vencido';
+  recorrencia_ativa: boolean;
+  parcela_atual: string;
+  parcela_total: string;
 };
 
 type ContaReceberForm = {
@@ -56,6 +63,38 @@ type ContaReceberForm = {
   valor: string;
   vencimento: string;
   status: 'Pendente' | 'Recebido' | 'Vencido';
+  recorrencia_ativa: boolean;
+  parcela_atual: string;
+  parcela_total: string;
+};
+
+type MetaCard = {
+  id: string;
+  titulo: string;
+  periodo: string;
+  meta: number;
+  realizado: number;
+  categoria: string;
+  responsavel: string;
+  status: 'Em andamento' | 'Concluída' | 'Planejada';
+};
+
+type FluxoRow = {
+  data: string;
+  dataISO: string;
+  entradas: number;
+  saidas: number;
+  saldo: number;
+};
+
+type AgendaFinanceiraRow = {
+  id: string;
+  tipo: 'Pagar' | 'Receber';
+  descricao: string;
+  cliente?: string;
+  valor: number;
+  vencimento: string;
+  status: string;
 };
 
 const MESES = [
@@ -73,27 +112,7 @@ const MESES = [
   'Dezembro',
 ];
 
-const ANOS = Array.from({ length: 10 }, (_, i) => 2024 + i);
-
-const BASE_MES = [52000, 61000, 55000, 67000, 72000, 68000, 81000, 74000, 87450, 79000, 91000, 105000];
-
-function gerarDadosAnuais(ano: number) {
-  const seed = (ano - 2024) * 0.08 + 1;
-
-  return MESES.map((mes, i) => {
-    const faturamento = Math.round(BASE_MES[i] * seed);
-    const custos = Math.round(faturamento * (0.56 + Math.sin(i + ano) * 0.04));
-    const lucro = faturamento - custos;
-
-    return {
-      mes: mes.slice(0, 3),
-      mesNum: i + 1,
-      faturamento,
-      custos,
-      lucro,
-    };
-  });
-}
+const ANOS = Array.from({ length: 60 }, (_, i) => 2026 + i);
 
 const statusPagarConfig: Record<string, string> = {
   Pendente: 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
@@ -113,6 +132,9 @@ const initialContaPagarForm: ContaPagarForm = {
   valor: '',
   vencimento: '',
   status: 'Pendente',
+  recorrencia_ativa: false,
+  parcela_atual: '1',
+  parcela_total: '1',
 };
 
 const initialContaReceberForm: ContaReceberForm = {
@@ -121,18 +143,74 @@ const initialContaReceberForm: ContaReceberForm = {
   valor: '',
   vencimento: '',
   status: 'Pendente',
+  recorrencia_ativa: false,
+  parcela_atual: '1',
+  parcela_total: '1',
 };
+
+function normalizeText(value: string) {
+  return (value || '').toLowerCase().trim();
+}
+
+function formatDateOnly(value?: string | null) {
+  if (!value) return '—';
+  const d = new Date(`${value}`.includes('T') ? value : `${value}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('pt-BR');
+}
+
+function parseISODate(value: string) {
+  const d = new Date(`${value}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function addMonths(baseDate: Date, monthsToAdd: number) {
+  const d = new Date(baseDate);
+  d.setMonth(d.getMonth() + monthsToAdd);
+  return d;
+}
+
+function toISODate(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function periodLabelFromMeta(periodo: string) {
+  if (periodo === 'Próximos 3 meses') return 'T1';
+  if (periodo === 'Próximos 6 meses') return 'T2';
+  if (periodo === '1 ano') return 'T4';
+  return periodo;
+}
+
+function getReceberActionLabel(status: string) {
+  if (status === 'Recebido') return 'Recebido';
+  if (status === 'Vencido') return 'Atrasado';
+  return 'A receber';
+}
+
+function getPagarActionLabel(status: string) {
+  if (status === 'Pago') return 'Pago';
+  if (status === 'Vencido') return 'Atrasado';
+  return 'A pagar';
+}
 
 export default function FinanceiroPage() {
   const [mainTab, setMainTab] = useState<MainTab>('visao-geral');
   const [contasTab, setContasTab] = useState<ContasTab>('pagar');
   const [mesSelecionado, setMesSelecionado] = useState(new Date().getMonth() + 1);
-  const [anoSelecionado, setAnoSelecionado] = useState(new Date().getFullYear());
+
+  const anoAtual = new Date().getFullYear();
+  const [anoSelecionado, setAnoSelecionado] = useState(
+    anoAtual < 2026 ? 2026 : anoAtual > 2085 ? 2085 : anoAtual
+  );
 
   const [contasPagar, setContasPagar] = useState<ContaPagar[]>([]);
   const [contasReceber, setContasReceber] = useState<ContaReceber[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
-  const [fluxoCaixa, setFluxoCaixa] = useState<{ data: string; entradas: number; saidas: number; saldo: number }[]>([]);
+  const [pedidos, setPedidos] = useState<Pedido[]>([]);
+  const [fluxoCaixa, setFluxoCaixa] = useState<FluxoRow[]>([]);
 
   const [modalOpen, setModalOpen] = useState<ModalType>(null);
   const [saving, setSaving] = useState(false);
@@ -142,27 +220,32 @@ export default function FinanceiroPage() {
   const [clienteBusca, setClienteBusca] = useState('');
 
   const fetchFinanceiro = useCallback(async () => {
-    const [{ data: pagar }, { data: receber }, { data: clientesData }] = await Promise.all([
-      supabase.from('contas_pagar').select('*').order('vencimento'),
-      supabase.from('contas_receber').select('*').order('vencimento'),
-      supabase.from('clientes').select('*').order('razao_social'),
-    ]);
+    const [{ data: pagar }, { data: receber }, { data: clientesData }, { data: pedidosData }] =
+      await Promise.all([
+        supabase.from('contas_pagar').select('*').order('vencimento'),
+        supabase.from('contas_receber').select('*').order('vencimento'),
+        supabase.from('clientes').select('*').order('razao_social'),
+        supabase.from('pedidos').select('*').order('created_at', { ascending: false }),
+      ]);
 
     if (pagar) setContasPagar(pagar as ContaPagar[]);
     if (receber) setContasReceber(receber as ContaReceber[]);
     if (clientesData) setClientes(clientesData as Cliente[]);
+    if (pedidosData) setPedidos(pedidosData as Pedido[]);
 
     if (pagar && receber) {
       const byDate: Record<string, { entradas: number; saidas: number }> = {};
 
       (receber as ContaReceber[]).forEach((c) => {
+        if (!c.vencimento) return;
         if (!byDate[c.vencimento]) byDate[c.vencimento] = { entradas: 0, saidas: 0 };
-        byDate[c.vencimento].entradas += c.valor;
+        byDate[c.vencimento].entradas += Number(c.valor || 0);
       });
 
       (pagar as ContaPagar[]).forEach((c) => {
+        if (!c.vencimento) return;
         if (!byDate[c.vencimento]) byDate[c.vencimento] = { entradas: 0, saidas: 0 };
-        byDate[c.vencimento].saidas += c.valor;
+        byDate[c.vencimento].saidas += Number(c.valor || 0);
       });
 
       let saldoAcum = 0;
@@ -173,10 +256,11 @@ export default function FinanceiroPage() {
           saldoAcum += v.entradas - v.saidas;
 
           return {
-            data: new Date(data + 'T00:00:00').toLocaleDateString('pt-BR', {
+            data: new Date(`${data}T00:00:00`).toLocaleDateString('pt-BR', {
               day: '2-digit',
               month: '2-digit',
             }),
+            dataISO: data,
             entradas: v.entradas,
             saidas: v.saidas,
             saldo: saldoAcum,
@@ -192,8 +276,21 @@ export default function FinanceiroPage() {
 
     const channel = supabase
       .channel('financeiro_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contas_pagar' }, () => fetchFinanceiro())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contas_receber' }, () => fetchFinanceiro())
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'contas_pagar' },
+        () => fetchFinanceiro()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'contas_receber' },
+        () => fetchFinanceiro()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'pedidos' },
+        () => fetchFinanceiro()
+      )
       .subscribe();
 
     return () => {
@@ -201,7 +298,52 @@ export default function FinanceiroPage() {
     };
   }, [fetchFinanceiro]);
 
-  const dadosAnuais = useMemo(() => gerarDadosAnuais(anoSelecionado), [anoSelecionado]);
+  const dadosAnuais = useMemo(() => {
+    const meses: Record<number, { faturamento: number; custos: number }> = {};
+
+    pedidos.forEach((p) => {
+      if (!p.created_at) return;
+      const data = new Date(p.created_at);
+      if (Number.isNaN(data.getTime())) return;
+
+      const ano = data.getFullYear();
+      const mes = data.getMonth() + 1;
+      if (ano !== anoSelecionado) return;
+
+      if (!meses[mes]) {
+        meses[mes] = { faturamento: 0, custos: 0 };
+      }
+
+      if (!['Cancelado'].includes(p.status || '')) {
+        meses[mes].faturamento += Number(p.valor || 0);
+      }
+    });
+
+    contasPagar.forEach((c) => {
+      if (c.ano !== anoSelecionado) return;
+
+      if (!meses[c.mes]) {
+        meses[c.mes] = { faturamento: 0, custos: 0 };
+      }
+
+      if (c.status === 'Pago') {
+        meses[c.mes].custos += Number(c.valor || 0);
+      }
+    });
+
+    return MESES.map((mes, i) => {
+      const m = meses[i + 1] || { faturamento: 0, custos: 0 };
+
+      return {
+        mes: mes.slice(0, 3),
+        mesNum: i + 1,
+        faturamento: m.faturamento,
+        custos: m.custos,
+        lucro: m.faturamento - m.custos,
+      };
+    });
+  }, [pedidos, contasPagar, anoSelecionado]);
+
   const dadosMes = useMemo(
     () => dadosAnuais.find((d) => d.mesNum === mesSelecionado),
     [dadosAnuais, mesSelecionado]
@@ -221,75 +363,226 @@ export default function FinanceiroPage() {
   );
   const margemMedia = totalFaturamento > 0 ? (totalLucro / totalFaturamento) * 100 : 0;
 
-  const contasPagarMes = contasPagar.filter((c) => c.mes === mesSelecionado && c.ano === anoSelecionado);
-  const contasReceberMes = contasReceber.filter((c) => c.mes === mesSelecionado && c.ano === anoSelecionado);
+  const contasPagarMes = useMemo(
+    () => contasPagar.filter((c) => c.mes === mesSelecionado && c.ano === anoSelecionado),
+    [contasPagar, mesSelecionado, anoSelecionado]
+  );
 
-  const totalPagarMes = contasPagarMes.reduce((sum, c) => sum + c.valor, 0);
-  const totalReceberMes = contasReceberMes.reduce((sum, c) => sum + c.valor, 0);
+  const contasReceberMes = useMemo(
+    () => contasReceber.filter((c) => c.mes === mesSelecionado && c.ano === anoSelecionado),
+    [contasReceber, mesSelecionado, anoSelecionado]
+  );
+
+  const totalPagarMes = contasPagarMes.reduce((sum, c) => sum + Number(c.valor || 0), 0);
+  const totalReceberMes = contasReceberMes.reduce((sum, c) => sum + Number(c.valor || 0), 0);
   const saldoProjetadoMes = totalReceberMes - totalPagarMes;
 
   const vencidasPagar = contasPagar.filter((c) => c.status === 'Vencido');
   const vencidasReceber = contasReceber.filter((c) => c.status === 'Vencido');
 
-  const metasBase = [
-    {
-      trimestre: 'T1',
-      periodo: 'Jan — Mar',
-      metaFaturamento: 180000,
-      realizadoFaturamento: 168000,
-      metaReducaoCustos: 5,
-      realizadoReducaoCustos: 4.2,
-      status: 'Encerrado',
-    },
-    {
-      trimestre: 'T2',
-      periodo: 'Abr — Jun',
-      metaFaturamento: 200000,
-      realizadoFaturamento: 207000,
-      metaReducaoCustos: 5,
-      realizadoReducaoCustos: 5.8,
-      status: 'Encerrado',
-    },
-    {
-      trimestre: 'T3',
-      periodo: 'Jul — Set',
-      metaFaturamento: 240000,
-      realizadoFaturamento: 242450,
-      metaReducaoCustos: 6,
-      realizadoReducaoCustos: 6.1,
-      status: 'Em andamento',
-    },
-    {
-      trimestre: 'T4',
-      periodo: 'Out — Dez',
-      metaFaturamento: 280000,
-      realizadoFaturamento: 0,
-      metaReducaoCustos: 7,
-      realizadoReducaoCustos: 0,
-      status: 'Futuro',
-    },
-  ];
-
-  const metasAno = useMemo(() => {
-    const seed = (anoSelecionado - 2026) * 0.08 + 1;
-
-    return metasBase.map((q) => ({
-      ...q,
-      metaFaturamento: Math.round(q.metaFaturamento * seed),
-      realizadoFaturamento:
-        q.status === 'Futuro' ? 0 : Math.round(q.realizadoFaturamento * seed),
-    }));
-  }, [anoSelecionado]);
-
   const clientesFiltrados = useMemo(() => {
     if (!clienteBusca.trim()) return [];
+
     return clientes
-      .filter((c) =>
-        (c.razao_social || '').toLowerCase().includes(clienteBusca.toLowerCase()) ||
-        (c.nome_fantasia || '').toLowerCase().includes(clienteBusca.toLowerCase())
-      )
+      .filter((c) => {
+        const razao = normalizeText((c as any).razao_social || '');
+        const fantasia = normalizeText((c as any).nome_fantasia || '');
+        const termo = normalizeText(clienteBusca);
+        return razao.includes(termo) || fantasia.includes(termo);
+      })
       .slice(0, 8);
   }, [clienteBusca, clientes]);
+
+  const topClientes = useMemo(() => {
+    const mapa = new Map<string, number>();
+
+    pedidos.forEach((p) => {
+      const nome = (p.cliente_nome || '').trim();
+      if (!nome) return;
+      if ((p.status || '') === 'Cancelado') return;
+      mapa.set(nome, (mapa.get(nome) || 0) + Number(p.valor || 0));
+    });
+
+    return [...mapa.entries()]
+      .map(([nome, valor]) => ({ nome, valor }))
+      .sort((a, b) => b.valor - a.valor)
+      .slice(0, 5);
+  }, [pedidos]);
+
+  const previsao30 = useMemo(() => {
+    const hoje = new Date();
+    const limite = addMonths(hoje, 1).getTime();
+
+    const entradas = contasReceber
+      .filter((c) => c.status !== 'Recebido')
+      .filter((c) => {
+        const d = parseISODate(c.vencimento);
+        return d && d.getTime() <= limite;
+      })
+      .reduce((sum, c) => sum + Number(c.valor || 0), 0);
+
+    const saidas = contasPagar
+      .filter((c) => c.status !== 'Pago')
+      .filter((c) => {
+        const d = parseISODate(c.vencimento);
+        return d && d.getTime() <= limite;
+      })
+      .reduce((sum, c) => sum + Number(c.valor || 0), 0);
+
+    return { entradas, saidas, saldo: entradas - saidas };
+  }, [contasReceber, contasPagar]);
+
+  const agendaFinanceira = useMemo<AgendaFinanceiraRow[]>(() => {
+    const pagar: AgendaFinanceiraRow[] = contasPagar
+      .filter((c) => c.ano === anoSelecionado)
+      .map((c) => ({
+        id: `p-${c.id}`,
+        tipo: 'Pagar',
+        descricao: c.descricao,
+        valor: Number(c.valor || 0),
+        vencimento: c.vencimento,
+        status: c.status,
+      }));
+
+    const receber: AgendaFinanceiraRow[] = contasReceber
+      .filter((c) => c.ano === anoSelecionado)
+      .map((c) => ({
+        id: `r-${c.id}`,
+        tipo: 'Receber',
+        descricao: c.descricao,
+        cliente: c.cliente_nome,
+        valor: Number(c.valor || 0),
+        vencimento: c.vencimento,
+        status: c.status,
+      }));
+
+    return [...pagar, ...receber]
+      .sort((a, b) => String(a.vencimento).localeCompare(String(b.vencimento)))
+      .slice(0, 12);
+  }, [contasPagar, contasReceber, anoSelecionado]);
+
+  const metasFinanceiras = useMemo<MetaCard[]>(() => {
+    const faturamentoTotalPedidos = pedidos
+      .filter((p) => (p.status || '') !== 'Cancelado')
+      .reduce((sum, p) => sum + Number(p.valor || 0), 0);
+
+    const metasBase: MetaCard[] = [
+      {
+        id: '1',
+        titulo: 'Meta de faturamento',
+        periodo: 'Próximos 3 meses',
+        meta: 150000,
+        realizado: 0,
+        categoria: 'Financeiro',
+        responsavel: 'Diretoria',
+        status: 'Em andamento',
+      },
+      {
+        id: '2',
+        titulo: 'Meta comercial Felipe',
+        periodo: 'Próximos 3 meses',
+        meta: 90000,
+        realizado: 0,
+        categoria: 'Vendas',
+        responsavel: 'Felipe Sevilha',
+        status: 'Em andamento',
+      },
+      {
+        id: '3',
+        titulo: 'Meta comercial Wanessa',
+        periodo: 'Próximos 3 meses',
+        meta: 75000,
+        realizado: 0,
+        categoria: 'Vendas',
+        responsavel: 'Wanessa Castro',
+        status: 'Em andamento',
+      },
+      {
+        id: '4',
+        titulo: 'Meta anual da operação',
+        periodo: '1 ano',
+        meta: 650000,
+        realizado: 0,
+        categoria: 'Estratégico',
+        responsavel: 'Gestão',
+        status: 'Planejada',
+      },
+    ];
+
+    return metasBase.map((meta) => {
+      if (meta.categoria === 'Financeiro') {
+        const realizado = faturamentoTotalPedidos;
+        return {
+          ...meta,
+          realizado,
+          status: realizado >= meta.meta ? 'Concluída' : 'Em andamento',
+        };
+      }
+
+      if (meta.responsavel === 'Felipe Sevilha') {
+        const realizado = faturamentoTotalPedidos * 0.55;
+        return {
+          ...meta,
+          realizado,
+          status: realizado >= meta.meta ? 'Concluída' : 'Em andamento',
+        };
+      }
+
+      if (meta.responsavel === 'Wanessa Castro') {
+        const realizado = faturamentoTotalPedidos * 0.45;
+        return {
+          ...meta,
+          realizado,
+          status: realizado >= meta.meta ? 'Concluída' : 'Em andamento',
+        };
+      }
+
+      return meta;
+    });
+  }, [pedidos]);
+
+  const metasResumo = useMemo(() => {
+    return {
+      total: metasFinanceiras.length,
+      andamento: metasFinanceiras.filter((m) => m.status === 'Em andamento').length,
+      planejadas: metasFinanceiras.filter((m) => m.status === 'Planejada').length,
+      concluidas: metasFinanceiras.filter((m) => m.status === 'Concluída').length,
+    };
+  }, [metasFinanceiras]);
+
+  async function atualizarStatusContaPagar(id: string, status: ContaPagar['status']) {
+    try {
+      await supabase
+        .from('contas_pagar')
+        .update({
+          status,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id);
+
+      fetchFinanceiro();
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao atualizar conta a pagar.');
+    }
+  }
+
+  async function atualizarStatusContaReceber(id: string, status: ContaReceber['status']) {
+    try {
+      await supabase
+        .from('contas_receber')
+        .update({
+          status,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id);
+
+      fetchFinanceiro();
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao atualizar conta a receber.');
+    }
+  }
 
   function openNovaDespesa() {
     setContaPagarForm({
@@ -338,22 +631,49 @@ export default function FinanceiroPage() {
         return;
       }
 
+      const parcelaAtual = Number(contaPagarForm.parcela_atual || 1);
+      const parcelaTotal = Number(contaPagarForm.parcela_total || 1);
+
+      if (parcelaAtual <= 0 || parcelaTotal <= 0 || parcelaAtual > parcelaTotal) {
+        alert('Revise as parcelas. Exemplo válido: 4/12.');
+        return;
+      }
+
       setSaving(true);
 
-      const vencimento = contaPagarForm.vencimento;
-      const data = new Date(`${vencimento}T00:00:00`);
+      const dataBase = parseISODate(contaPagarForm.vencimento);
+      if (!dataBase) {
+        alert('Data de vencimento inválida.');
+        return;
+      }
 
-      await supabase.from('contas_pagar').insert({
-        descricao: contaPagarForm.descricao.trim(),
-        categoria: contaPagarForm.categoria.trim(),
-        valor: Number(contaPagarForm.valor),
-        vencimento,
-        status: contaPagarForm.status,
-        ano: data.getFullYear(),
-        mes: data.getMonth() + 1,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+      const inserts = [];
+      const repetir =
+        contaPagarForm.recorrencia_ativa && parcelaTotal > parcelaAtual
+          ? parcelaTotal - parcelaAtual + 1
+          : 1;
+
+      for (let i = 0; i < repetir; i += 1) {
+        const dataParcela = addMonths(dataBase, i);
+        const numeroParcela = contaPagarForm.recorrencia_ativa ? parcelaAtual + i : parcelaAtual;
+        const descricaoFinal = contaPagarForm.recorrencia_ativa
+          ? `${contaPagarForm.descricao.trim()} ${numeroParcela}/${parcelaTotal}`
+          : contaPagarForm.descricao.trim();
+
+        inserts.push({
+          descricao: descricaoFinal,
+          categoria: contaPagarForm.categoria.trim(),
+          valor: Number(contaPagarForm.valor),
+          vencimento: toISODate(dataParcela),
+          status: contaPagarForm.status,
+          ano: dataParcela.getFullYear(),
+          mes: dataParcela.getMonth() + 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+
+      await supabase.from('contas_pagar').insert(inserts);
 
       closeModal();
       fetchFinanceiro();
@@ -387,22 +707,49 @@ export default function FinanceiroPage() {
         return;
       }
 
+      const parcelaAtual = Number(contaReceberForm.parcela_atual || 1);
+      const parcelaTotal = Number(contaReceberForm.parcela_total || 1);
+
+      if (parcelaAtual <= 0 || parcelaTotal <= 0 || parcelaAtual > parcelaTotal) {
+        alert('Revise as parcelas. Exemplo válido: 4/12.');
+        return;
+      }
+
       setSaving(true);
 
-      const vencimento = contaReceberForm.vencimento;
-      const data = new Date(`${vencimento}T00:00:00`);
+      const dataBase = parseISODate(contaReceberForm.vencimento);
+      if (!dataBase) {
+        alert('Data de vencimento inválida.');
+        return;
+      }
 
-      await supabase.from('contas_receber').insert({
-        cliente_nome: contaReceberForm.cliente_nome.trim(),
-        descricao: contaReceberForm.descricao.trim(),
-        valor: Number(contaReceberForm.valor),
-        vencimento,
-        status: contaReceberForm.status,
-        ano: data.getFullYear(),
-        mes: data.getMonth() + 1,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+      const inserts = [];
+      const repetir =
+        contaReceberForm.recorrencia_ativa && parcelaTotal > parcelaAtual
+          ? parcelaTotal - parcelaAtual + 1
+          : 1;
+
+      for (let i = 0; i < repetir; i += 1) {
+        const dataParcela = addMonths(dataBase, i);
+        const numeroParcela = contaReceberForm.recorrencia_ativa ? parcelaAtual + i : parcelaAtual;
+        const descricaoFinal = contaReceberForm.recorrencia_ativa
+          ? `${contaReceberForm.descricao.trim()} ${numeroParcela}/${parcelaTotal}`
+          : contaReceberForm.descricao.trim();
+
+        inserts.push({
+          cliente_nome: contaReceberForm.cliente_nome.trim(),
+          descricao: descricaoFinal,
+          valor: Number(contaReceberForm.valor),
+          vencimento: toISODate(dataParcela),
+          status: contaReceberForm.status,
+          ano: dataParcela.getFullYear(),
+          mes: dataParcela.getMonth() + 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+
+      await supabase.from('contas_receber').insert(inserts);
 
       closeModal();
       fetchFinanceiro();
@@ -510,15 +857,13 @@ export default function FinanceiroPage() {
             <div className="erp-card p-5">
               <div className="mb-3 flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Custos do mês
+                  Custos pagos no mês
                 </p>
                 <TrendingDown className="h-4 w-4 text-red-500" />
               </div>
               <p className="text-3xl font-bold text-red-500">{fmt(dadosMes?.custos ?? 0)}</p>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                {dadosMes && dadosMes.faturamento > 0
-                  ? `${((dadosMes.custos / dadosMes.faturamento) * 100).toFixed(1)}% da receita`
-                  : '—'}
+                Base real de contas pagas
               </p>
             </div>
 
@@ -541,15 +886,19 @@ export default function FinanceiroPage() {
             <div className="erp-card p-5">
               <div className="mb-3 flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Saldo projetado
+                  Saldo projetado do mês
                 </p>
                 <Wallet className="h-4 w-4 text-violet-500" />
               </div>
-              <p className={`text-3xl font-bold ${saldoProjetadoMes >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+              <p
+                className={`text-3xl font-bold ${
+                  saldoProjetadoMes >= 0 ? 'text-emerald-500' : 'text-red-500'
+                }`}
+              >
                 {fmt(saldoProjetadoMes)}
               </p>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Entradas - Saídas do período
+                Contas a receber - contas a pagar
               </p>
             </div>
           </section>
@@ -558,8 +907,8 @@ export default function FinanceiroPage() {
             <div className="erp-card p-5">
               <div className="mb-5 flex items-center justify-between">
                 <div>
-                  <h2 className="erp-section-title">Desempenho anual</h2>
-                  <p className="erp-section-subtitle">Faturamento, custos e lucro por mês</p>
+                  <h2 className="erp-section-title">Desempenho anual real</h2>
+                  <p className="erp-section-subtitle">Pedidos x custos pagos por mês</p>
                 </div>
                 <Landmark className="h-5 w-5 text-slate-400" />
               </div>
@@ -568,22 +917,38 @@ export default function FinanceiroPage() {
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={dadosAnuais}>
                     <defs>
-                      <linearGradient id="faturamentoFill" x1="0" y1="0" x2="0" y2="1">
+                      <linearGradient id="faturamentoFillReal" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.35} />
                         <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0.03} />
                       </linearGradient>
-                      <linearGradient id="lucroFill" x1="0" y1="0" x2="0" y2="1">
+                      <linearGradient id="lucroFillReal" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
                         <stop offset="95%" stopColor="#10b981" stopOpacity={0.03} />
                       </linearGradient>
                     </defs>
 
-                    <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-slate-200 dark:text-slate-800" />
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="currentColor"
+                      className="text-slate-200 dark:text-slate-800"
+                    />
                     <XAxis dataKey="mes" stroke="currentColor" className="text-xs text-slate-400" />
                     <YAxis tickFormatter={fmtShort} stroke="currentColor" className="text-xs text-slate-400" />
                     <Tooltip formatter={(value: number) => fmt(value)} />
-                    <Area type="monotone" dataKey="faturamento" stroke="#0ea5e9" fill="url(#faturamentoFill)" strokeWidth={2} />
-                    <Area type="monotone" dataKey="lucro" stroke="#10b981" fill="url(#lucroFill)" strokeWidth={2} />
+                    <Area
+                      type="monotone"
+                      dataKey="faturamento"
+                      stroke="#0ea5e9"
+                      fill="url(#faturamentoFillReal)"
+                      strokeWidth={2}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="lucro"
+                      stroke="#10b981"
+                      fill="url(#lucroFillReal)"
+                      strokeWidth={2}
+                    />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -594,7 +959,7 @@ export default function FinanceiroPage() {
                 <div className="mb-5 flex items-center justify-between">
                   <div>
                     <h2 className="erp-section-title">Resumo anual</h2>
-                    <p className="erp-section-subtitle">Visão consolidada</p>
+                    <p className="erp-section-subtitle">Consolidado da operação</p>
                   </div>
                   <Target className="h-5 w-5 text-slate-400" />
                 </div>
@@ -602,11 +967,13 @@ export default function FinanceiroPage() {
                 <div className="space-y-3">
                   <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-900">
                     <p className="text-xs text-slate-500 dark:text-slate-400">Faturamento</p>
-                    <p className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{fmt(totalFaturamento)}</p>
+                    <p className="mt-1 text-xl font-bold text-slate-900 dark:text-white">
+                      {fmt(totalFaturamento)}
+                    </p>
                   </div>
 
                   <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-900">
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Custos</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Custos pagos</p>
                     <p className="mt-1 text-xl font-bold text-red-500">{fmt(totalCustos)}</p>
                   </div>
 
@@ -617,7 +984,9 @@ export default function FinanceiroPage() {
 
                   <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-900">
                     <p className="text-xs text-slate-500 dark:text-slate-400">Margem média</p>
-                    <p className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{margemMedia.toFixed(1)}%</p>
+                    <p className="mt-1 text-xl font-bold text-slate-900 dark:text-white">
+                      {margemMedia.toFixed(1)}%
+                    </p>
                   </div>
                 </div>
               </div>
@@ -626,7 +995,7 @@ export default function FinanceiroPage() {
                 <div className="mb-5 flex items-center justify-between">
                   <div>
                     <h2 className="erp-section-title">Alertas financeiros</h2>
-                    <p className="erp-section-subtitle">Pendências e vencimentos</p>
+                    <p className="erp-section-subtitle">Pendências e risco de caixa</p>
                   </div>
                   <AlertCircle className="h-5 w-5 text-slate-400" />
                 </div>
@@ -643,7 +1012,103 @@ export default function FinanceiroPage() {
                       Contas a receber vencidas: {vencidasReceber.length}
                     </p>
                   </div>
+
+                  <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4 dark:border-violet-500/20 dark:bg-violet-500/10">
+                    <p className="text-sm font-semibold text-violet-700 dark:text-violet-300">
+                      Previsão 30 dias: {fmt(previsao30.saldo)}
+                    </p>
+                  </div>
                 </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="grid gap-6 xl:grid-cols-[1fr,1fr]">
+            <div className="erp-card p-5">
+              <div className="mb-5 flex items-center gap-2">
+                <Users className="h-5 w-5 text-sky-500" />
+                <div>
+                  <h2 className="erp-section-title">Top clientes por faturamento</h2>
+                  <p className="erp-section-subtitle">Base real da aba Pedidos</p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {topClientes.length > 0 ? (
+                  topClientes.map((cliente, index) => (
+                    <div
+                      key={cliente.nome}
+                      className="flex items-center justify-between rounded-2xl bg-slate-50 p-4 dark:bg-slate-900"
+                    >
+                      <div>
+                        <p className="text-sm text-slate-500 dark:text-slate-400">#{index + 1}</p>
+                        <p className="font-semibold text-slate-900 dark:text-white">
+                          {cliente.nome}
+                        </p>
+                      </div>
+                      <p className="text-lg font-bold text-slate-900 dark:text-white">
+                        {fmt(cliente.valor)}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                    Ainda não há pedidos suficientes para ranking.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="erp-card p-5">
+              <div className="mb-5 flex items-center gap-2">
+                <CalendarRange className="h-5 w-5 text-violet-500" />
+                <div>
+                  <h2 className="erp-section-title">Agenda financeira</h2>
+                  <p className="erp-section-subtitle">Próximos compromissos do ano</p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {agendaFinanceira.length > 0 ? (
+                  agendaFinanceira.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950"
+                    >
+                      <div>
+                        <p className="text-xs uppercase tracking-wide text-slate-400">
+                          {item.tipo}
+                        </p>
+                        <p className="font-semibold text-slate-900 dark:text-white">
+                          {item.cliente ? `${item.cliente} • ` : ''}
+                          {item.descricao}
+                        </p>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                          {formatDateOnly(item.vencimento)}
+                        </p>
+                      </div>
+
+                      <div className="text-right">
+                        <p className="font-semibold text-slate-900 dark:text-white">
+                          {fmt(item.valor)}
+                        </p>
+                        <span
+                          className={`mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            item.tipo === 'Pagar'
+                              ? statusPagarConfig[item.status] || statusPagarConfig.Pendente
+                              : statusReceberConfig[item.status] || statusReceberConfig.Pendente
+                          }`}
+                        >
+                          {item.status}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                    Nenhuma movimentação encontrada.
+                  </div>
+                )}
               </div>
             </div>
           </section>
@@ -694,12 +1159,12 @@ export default function FinanceiroPage() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm">
+            <table className="w-full min-w-[1100px] text-sm">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-900/60">
                   {(contasTab === 'pagar'
-                    ? ['Descrição', 'Categoria', 'Vencimento', 'Valor', 'Status']
-                    : ['Cliente', 'Descrição', 'Vencimento', 'Valor', 'Status']
+                    ? ['Descrição', 'Categoria', 'Vencimento', 'Valor', 'Status', 'Ação']
+                    : ['Cliente', 'Descrição', 'Vencimento', 'Valor', 'Status', 'Ação']
                   ).map((h) => (
                     <th
                       key={h}
@@ -714,32 +1179,94 @@ export default function FinanceiroPage() {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {contasTab === 'pagar'
                   ? contasPagarMes.map((conta) => (
-                      <tr key={conta.id} className="transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50">
-                        <td className="px-5 py-3 font-medium text-slate-900 dark:text-white">{conta.descricao}</td>
-                        <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{conta.categoria}</td>
-                        <td className="px-5 py-3 text-slate-600 dark:text-slate-300">
-                          {new Date(conta.vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}
+                      <tr
+                        key={conta.id}
+                        className="transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50"
+                      >
+                        <td className="px-5 py-3 font-medium text-slate-900 dark:text-white">
+                          {conta.descricao}
                         </td>
-                        <td className="px-5 py-3 font-semibold text-slate-900 dark:text-white">{fmt(conta.valor)}</td>
+                        <td className="px-5 py-3 text-slate-600 dark:text-slate-300">
+                          {conta.categoria}
+                        </td>
+                        <td className="px-5 py-3 text-slate-600 dark:text-slate-300">
+                          {formatDateOnly(conta.vencimento)}
+                        </td>
+                        <td className="px-5 py-3 font-semibold text-slate-900 dark:text-white">
+                          {fmt(conta.valor)}
+                        </td>
                         <td className="px-5 py-3">
-                          <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusPagarConfig[conta.status]}`}>
-                            {conta.status}
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                              statusPagarConfig[conta.status]
+                            }`}
+                          >
+                            {getPagarActionLabel(conta.status)}
                           </span>
+                        </td>
+                        <td className="px-5 py-3">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => atualizarStatusContaPagar(conta.id, 'Pendente')}
+                              className="rounded-xl bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-600"
+                            >
+                              A pagar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => atualizarStatusContaPagar(conta.id, 'Pago')}
+                              className="rounded-xl bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-600"
+                            >
+                              Pago
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
                   : contasReceberMes.map((conta) => (
-                      <tr key={conta.id} className="transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50">
-                        <td className="px-5 py-3 font-medium text-slate-900 dark:text-white">{conta.cliente_nome}</td>
-                        <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{conta.descricao}</td>
-                        <td className="px-5 py-3 text-slate-600 dark:text-slate-300">
-                          {new Date(conta.vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}
+                      <tr
+                        key={conta.id}
+                        className="transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50"
+                      >
+                        <td className="px-5 py-3 font-medium text-slate-900 dark:text-white">
+                          {conta.cliente_nome}
                         </td>
-                        <td className="px-5 py-3 font-semibold text-slate-900 dark:text-white">{fmt(conta.valor)}</td>
+                        <td className="px-5 py-3 text-slate-600 dark:text-slate-300">
+                          {conta.descricao}
+                        </td>
+                        <td className="px-5 py-3 text-slate-600 dark:text-slate-300">
+                          {formatDateOnly(conta.vencimento)}
+                        </td>
+                        <td className="px-5 py-3 font-semibold text-slate-900 dark:text-white">
+                          {fmt(conta.valor)}
+                        </td>
                         <td className="px-5 py-3">
-                          <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusReceberConfig[conta.status]}`}>
-                            {conta.status}
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                              statusReceberConfig[conta.status]
+                            }`}
+                          >
+                            {getReceberActionLabel(conta.status)}
                           </span>
+                        </td>
+                        <td className="px-5 py-3">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => atualizarStatusContaReceber(conta.id, 'Recebido')}
+                              className="rounded-xl bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-600"
+                            >
+                              Recebido
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => atualizarStatusContaReceber(conta.id, 'Vencido')}
+                              className="rounded-xl bg-red-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-600"
+                            >
+                              Atrasado
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -747,7 +1274,10 @@ export default function FinanceiroPage() {
                 {((contasTab === 'pagar' && contasPagarMes.length === 0) ||
                   (contasTab === 'receber' && contasReceberMes.length === 0)) && (
                   <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400">
+                    <td
+                      colSpan={6}
+                      className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400"
+                    >
                       Nenhum lançamento encontrado para o período.
                     </td>
                   </tr>
@@ -779,7 +1309,11 @@ export default function FinanceiroPage() {
                     </linearGradient>
                   </defs>
 
-                  <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-slate-200 dark:text-slate-800" />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="currentColor"
+                    className="text-slate-200 dark:text-slate-800"
+                  />
                   <XAxis dataKey="data" stroke="currentColor" className="text-xs text-slate-400" />
                   <YAxis tickFormatter={fmtShort} stroke="currentColor" className="text-xs text-slate-400" />
                   <Tooltip formatter={(value: number) => fmt(value)} />
@@ -801,7 +1335,11 @@ export default function FinanceiroPage() {
             <div className="h-[320px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={fluxoCaixa}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-slate-200 dark:text-slate-800" />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="currentColor"
+                    className="text-slate-200 dark:text-slate-800"
+                  />
                   <XAxis dataKey="data" stroke="currentColor" className="text-xs text-slate-400" />
                   <YAxis tickFormatter={fmtShort} stroke="currentColor" className="text-xs text-slate-400" />
                   <Tooltip formatter={(value: number) => fmt(value)} />
@@ -815,94 +1353,129 @@ export default function FinanceiroPage() {
       )}
 
       {mainTab === 'metas' && (
-        <section className="grid gap-4 xl:grid-cols-2">
-          {metasAno.map((meta) => {
-            const percentual = meta.metaFaturamento > 0
-              ? Math.min((meta.realizadoFaturamento / meta.metaFaturamento) * 100, 100)
-              : 0;
+        <>
+          <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+            <div className="erp-card p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Total de metas
+                </p>
+                <Target className="h-4 w-4 text-sky-500" />
+              </div>
+              <p className="text-3xl font-bold text-slate-900 dark:text-white">{metasResumo.total}</p>
+            </div>
 
-            return (
-              <div key={meta.trimestre} className="erp-card p-5">
-                <div className="mb-4 flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                      {meta.trimestre}
-                    </p>
-                    <h3 className="mt-1 text-lg font-bold text-slate-900 dark:text-white">
-                      {meta.periodo}
-                    </h3>
-                  </div>
+            <div className="erp-card p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Em andamento
+                </p>
+                <Clock3 className="h-4 w-4 text-amber-500" />
+              </div>
+              <p className="text-3xl font-bold text-slate-900 dark:text-white">{metasResumo.andamento}</p>
+            </div>
 
-                  <span
-                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                      meta.status === 'Encerrado'
-                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
-                        : meta.status === 'Em andamento'
-                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
-                        : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                    }`}
-                  >
-                    {meta.status}
-                  </span>
-                </div>
+            <div className="erp-card p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Planejadas
+                </p>
+                <Wallet className="h-4 w-4 text-cyan-500" />
+              </div>
+              <p className="text-3xl font-bold text-slate-900 dark:text-white">{metasResumo.planejadas}</p>
+            </div>
 
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-900">
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Meta faturamento</p>
-                    <p className="mt-1 text-lg font-bold text-slate-900 dark:text-white">
-                      {fmt(meta.metaFaturamento)}
-                    </p>
-                  </div>
+            <div className="erp-card p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Concluídas
+                </p>
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+              </div>
+              <p className="text-3xl font-bold text-slate-900 dark:text-white">{metasResumo.concluidas}</p>
+            </div>
+          </section>
 
-                  <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-900">
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Realizado</p>
-                    <p className="mt-1 text-lg font-bold text-slate-900 dark:text-white">
-                      {fmt(meta.realizadoFaturamento)}
-                    </p>
-                  </div>
-                </div>
+          <section className="grid gap-4 xl:grid-cols-2">
+            {metasFinanceiras.map((meta) => {
+              const percentual =
+                meta.meta > 0 ? Math.min((meta.realizado / meta.meta) * 100, 100) : 0;
 
-                <div className="mt-4">
-                  <div className="mb-2 flex items-center justify-between text-sm">
-                    <span className="text-slate-600 dark:text-slate-300">Progresso</span>
-                    <span className="font-semibold text-slate-900 dark:text-white">
-                      {percentual.toFixed(1)}%
+              return (
+                <div key={meta.id} className="erp-card p-5">
+                  <div className="mb-4 flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                        {meta.categoria} • {periodLabelFromMeta(meta.periodo)}
+                      </p>
+                      <h3 className="mt-1 text-lg font-bold text-slate-900 dark:text-white">
+                        {meta.titulo}
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        {meta.periodo}
+                      </p>
+                    </div>
+
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                        meta.status === 'Concluída'
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                          : meta.status === 'Em andamento'
+                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
+                          : 'bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300'
+                      }`}
+                    >
+                      {meta.status}
                     </span>
                   </div>
 
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-sky-500 to-cyan-500"
-                      style={{ width: `${percentual}%` }}
-                    />
-                  </div>
-                </div>
-
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Redução meta</p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-950">
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Meta</p>
+                      <p className="mt-1 text-lg font-bold text-slate-900 dark:text-white">
+                        {fmt(meta.meta)}
+                      </p>
                     </div>
-                    <p className="mt-1 font-semibold text-slate-900 dark:text-white">
-                      {meta.metaReducaoCustos.toFixed(1)}%
-                    </p>
+
+                    <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-950">
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Realizado</p>
+                      <p className="mt-1 text-lg font-bold text-slate-900 dark:text-white">
+                        {fmt(meta.realizado)}
+                      </p>
+                    </div>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-                    <div className="flex items-center gap-2">
-                      <Clock3 className="h-4 w-4 text-amber-500" />
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Redução atual</p>
+                  <div className="mt-4">
+                    <div className="mb-2 flex items-center justify-between text-sm">
+                      <span className="text-slate-600 dark:text-slate-300">Progresso</span>
+                      <span className="font-semibold text-slate-900 dark:text-white">
+                        {percentual.toFixed(1)}%
+                      </span>
                     </div>
-                    <p className="mt-1 font-semibold text-slate-900 dark:text-white">
-                      {meta.realizadoReducaoCustos.toFixed(1)}%
+
+                    <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-sky-500 to-cyan-500"
+                        style={{ width: `${percentual}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center gap-2 rounded-2xl bg-slate-50 p-3 dark:bg-slate-950">
+                    {meta.categoria === 'Vendas' ? (
+                      <Users className="h-4 w-4 text-sky-500" />
+                    ) : (
+                      <BadgeDollarSign className="h-4 w-4 text-emerald-500" />
+                    )}
+                    <p className="text-sm text-slate-600 dark:text-slate-300">
+                      Responsável: <span className="font-semibold">{meta.responsavel}</span>
                     </p>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </section>
+              );
+            })}
+          </section>
+        </>
       )}
 
       {modalOpen && (
@@ -990,7 +1563,7 @@ export default function FinanceiroPage() {
 
                 <div>
                   <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
-                    Status
+                    Status inicial
                   </label>
                   <select
                     value={contaPagarForm.status}
@@ -1006,6 +1579,65 @@ export default function FinanceiroPage() {
                     <option>Pago</option>
                     <option>Vencido</option>
                   </select>
+                </div>
+
+                <div className="md:col-span-2 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                      Recorrência / parcelas
+                    </p>
+                    <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={contaPagarForm.recorrencia_ativa}
+                        onChange={(e) =>
+                          setContaPagarForm((prev) => ({
+                            ...prev,
+                            recorrencia_ativa: e.target.checked,
+                          }))
+                        }
+                      />
+                      Repetir automaticamente
+                    </label>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                        Parcela atual
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={contaPagarForm.parcela_atual}
+                        onChange={(e) =>
+                          setContaPagarForm((prev) => ({
+                            ...prev,
+                            parcela_atual: e.target.value,
+                          }))
+                        }
+                        className="erp-input w-full"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                        Total de parcelas
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={contaPagarForm.parcela_total}
+                        onChange={(e) =>
+                          setContaPagarForm((prev) => ({
+                            ...prev,
+                            parcela_total: e.target.value,
+                          }))
+                        }
+                        className="erp-input w-full"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="md:col-span-2 mt-2 flex justify-end gap-3">
@@ -1050,10 +1682,12 @@ export default function FinanceiroPage() {
                   {clienteBusca.trim() && clientesFiltrados.length > 0 && (
                     <div className="mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
                       {clientesFiltrados.map((cliente) => {
-                        const nome = cliente.razao_social || cliente.nome_fantasia || 'Cliente';
+                        const nome =
+                          ((cliente as any).razao_social || (cliente as any).nome_fantasia || 'Cliente') as string;
+
                         return (
                           <button
-                            key={cliente.id}
+                            key={(cliente as any).id}
                             type="button"
                             onClick={() => {
                               setContaReceberForm((prev) => ({
@@ -1118,7 +1752,7 @@ export default function FinanceiroPage() {
 
                 <div>
                   <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
-                    Status
+                    Status inicial
                   </label>
                   <select
                     value={contaReceberForm.status}
@@ -1134,6 +1768,65 @@ export default function FinanceiroPage() {
                     <option>Recebido</option>
                     <option>Vencido</option>
                   </select>
+                </div>
+
+                <div className="md:col-span-2 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                      Recorrência / parcelas
+                    </p>
+                    <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={contaReceberForm.recorrencia_ativa}
+                        onChange={(e) =>
+                          setContaReceberForm((prev) => ({
+                            ...prev,
+                            recorrencia_ativa: e.target.checked,
+                          }))
+                        }
+                      />
+                      Repetir automaticamente
+                    </label>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                        Parcela atual
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={contaReceberForm.parcela_atual}
+                        onChange={(e) =>
+                          setContaReceberForm((prev) => ({
+                            ...prev,
+                            parcela_atual: e.target.value,
+                          }))
+                        }
+                        className="erp-input w-full"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                        Total de parcelas
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={contaReceberForm.parcela_total}
+                        onChange={(e) =>
+                          setContaReceberForm((prev) => ({
+                            ...prev,
+                            parcela_total: e.target.value,
+                          }))
+                        }
+                        className="erp-input w-full"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="md:col-span-2 mt-2 flex justify-end gap-3">
