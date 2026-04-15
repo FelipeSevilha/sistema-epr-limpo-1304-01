@@ -7,8 +7,9 @@ import {
   BadgeDollarSign,
   TrendingUp,
   Users,
-  PackageCheck,
   Eye,
+  Plus,
+  X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
@@ -29,21 +30,6 @@ type Pedido = {
   cliente_nome?: string | null;
   valor?: number | null;
   status?: string | null;
-  produto?: string | null;
-};
-
-type ClienteView = {
-  id: string;
-  nome: string;
-  contato: string;
-  telefone: string;
-  email: string;
-  cidade: string;
-  ativo: boolean;
-  pedidos: number;
-  faturamento: number;
-  ticketMedio: number;
-  statusEntrega: number;
 };
 
 const fmt = (v: number) =>
@@ -57,293 +43,242 @@ export default function ClientesPage() {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState<ClienteView | null>(null);
+  const [open, setOpen] = useState(false);
+
+  const [form, setForm] = useState<any>({
+    razao_social: '',
+    nome_fantasia: '',
+    cnpj: '',
+    cep: '',
+    endereco: '',
+    numero: '',
+    bairro: '',
+    cidade: '',
+    estado: 'SP',
+
+    contato_comercial: '',
+    telefone_comercial: '',
+
+    contato_financeiro: '',
+    telefone_financeiro: '',
+  });
+
+  /* =========================
+     LOAD
+  ========================= */
 
   useEffect(() => {
     async function fetchData() {
-      setLoading(true);
-
       const [cliRes, pedRes] = await Promise.all([
-        supabase.from('clientes').select('*').order('razao_social', { ascending: true }),
-        supabase.from('pedidos').select('*').order('created_at', { ascending: false }),
+        supabase.from('clientes').select('*'),
+        supabase.from('pedidos').select('*'),
       ]);
 
-      setClientes((cliRes.data as Cliente[]) || []);
-      setPedidos((pedRes.data as Pedido[]) || []);
+      setClientes(cliRes.data || []);
+      setPedidos(pedRes.data || []);
       setLoading(false);
     }
 
     fetchData();
   }, []);
 
-  const clientesView = useMemo<ClienteView[]>(() => {
-    return clientes.map((cliente) => {
-      const nome = cliente.razao_social || cliente.nome_fantasia || 'Cliente sem nome';
-      const pedidosCliente = pedidos.filter(
-        (p) => (p.cliente_nome || '').toLowerCase() === nome.toLowerCase()
-      );
-
-      const faturamento = pedidosCliente.reduce((sum, p) => sum + Number(p.valor || 0), 0);
-      const ticketMedio = pedidosCliente.length > 0 ? faturamento / pedidosCliente.length : 0;
-      const statusEntrega = pedidosCliente.filter((p) =>
-        ['Pronto', 'Entregue'].includes(p.status || '')
-      ).length;
-
-      return {
-        id: cliente.id,
-        nome,
-        contato: cliente.contato || '—',
-        telefone: cliente.telefone || '—',
-        email: cliente.email || '—',
-        cidade: [cliente.cidade, cliente.uf].filter(Boolean).join(' / ') || '—',
-        ativo: Boolean(cliente.ativo),
-        pedidos: pedidosCliente.length,
-        faturamento,
-        ticketMedio,
-        statusEntrega,
-      };
-    });
-  }, [clientes, pedidos]);
+  /* =========================
+     BUSCA
+  ========================= */
 
   const filtrados = useMemo(() => {
-    return clientesView
-      .filter((cliente) => {
-        return (
-          cliente.nome.toLowerCase().includes(search.toLowerCase()) ||
-          cliente.contato.toLowerCase().includes(search.toLowerCase()) ||
-          cliente.email.toLowerCase().includes(search.toLowerCase())
-        );
-      })
-      .sort((a, b) => b.faturamento - a.faturamento);
-  }, [clientesView, search]);
-
-  const resumo = useMemo(() => {
-    const total = clientesView.length;
-    const ativos = clientesView.filter((c) => c.ativo).length;
-    const faturamento = clientesView.reduce((sum, c) => sum + c.faturamento, 0);
-    const ticketMedio = total > 0 ? faturamento / Math.max(clientesView.reduce((sum, c) => sum + c.pedidos, 0), 1) : 0;
-
-    return { total, ativos, faturamento, ticketMedio };
-  }, [clientesView]);
-
-  if (loading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
-      </div>
+    return clientes.filter((c) =>
+      (c.razao_social || '')
+        .toLowerCase()
+        .includes(search.toLowerCase())
     );
+  }, [clientes, search]);
+
+  /* =========================
+     SALVAR
+  ========================= */
+
+  async function salvar() {
+    await supabase.from('clientes').insert({
+      ...form,
+      created_at: new Date().toISOString(),
+    });
+
+    alert('Cliente criado!');
+    setOpen(false);
+    location.reload();
   }
+
+  if (loading) return <div className="p-10">Carregando...</div>;
 
   return (
     <div className="space-y-6">
-      <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-        <div className="erp-card p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Clientes
-            </p>
-            <Building2 className="h-4 w-4 text-sky-500" />
+
+      {/* HEADER */}
+      <div className="flex justify-between items-center">
+
+        <input
+          placeholder="Buscar cliente..."
+          className="erp-input w-80"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+
+        <button
+          onClick={() => setOpen(true)}
+          className="erp-button-primary flex items-center gap-2"
+        >
+          <Plus size={16} />
+          Novo Cliente
+        </button>
+      </div>
+
+      {/* LISTA */}
+      <div className="grid grid-cols-3 gap-4">
+        {filtrados.map((c) => (
+          <div key={c.id} className="erp-card p-4">
+            <h3 className="font-bold">{c.razao_social}</h3>
+            <p className="text-sm text-slate-500">{c.telefone}</p>
           </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.total}</p>
-        </div>
+        ))}
+      </div>
 
-        <div className="erp-card p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Ativos
-            </p>
-            <Users className="h-4 w-4 text-emerald-500" />
-          </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.ativos}</p>
-        </div>
+      {/* SIDEBAR PREMIUM */}
+      {open && (
+        <div className="fixed inset-0 z-50 flex">
 
-        <div className="erp-card p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Faturamento
-            </p>
-            <BadgeDollarSign className="h-4 w-4 text-violet-500" />
-          </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">{fmt(resumo.faturamento)}</p>
-        </div>
+          {/* BACKDROP */}
+          <div
+            className="flex-1 bg-black/40"
+            onClick={() => setOpen(false)}
+          />
 
-        <div className="erp-card p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Ticket médio
-            </p>
-            <TrendingUp className="h-4 w-4 text-cyan-500" />
-          </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">{fmt(resumo.ticketMedio)}</p>
-        </div>
-      </section>
+          {/* SIDEBAR */}
+          <div className="w-[500px] bg-white dark:bg-slate-900 h-full overflow-auto shadow-2xl">
 
-      <section className="erp-card overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-slate-200/70 px-5 py-4 dark:border-slate-800 md:flex-row md:items-center md:justify-between">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar cliente, contato ou e-mail..."
-              className="erp-input w-80 pl-10"
-            />
-          </div>
-        </div>
-
-        <div className="grid gap-4 p-5 lg:grid-cols-2 xl:grid-cols-3">
-          {filtrados.map((cliente) => (
-            <div
-              key={cliente.id}
-              className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"
-            >
-              <div className="mb-4 flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                    {cliente.nome}
-                  </h3>
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                    {cliente.cidade}
-                  </p>
-                </div>
-
-                <span
-                  className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                    cliente.ativo
-                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
-                      : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                  }`}
-                >
-                  {cliente.ativo ? 'Ativo' : 'Inativo'}
-                </span>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-2xl bg-slate-50 p-3 dark:bg-slate-950">
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Pedidos</p>
-                  <p className="mt-1 font-semibold text-slate-900 dark:text-white">{cliente.pedidos}</p>
-                </div>
-
-                <div className="rounded-2xl bg-slate-50 p-3 dark:bg-slate-950">
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Entregues / prontos</p>
-                  <p className="mt-1 font-semibold text-slate-900 dark:text-white">{cliente.statusEntrega}</p>
-                </div>
-
-                <div className="rounded-2xl bg-slate-50 p-3 dark:bg-slate-950">
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Faturamento</p>
-                  <p className="mt-1 font-semibold text-slate-900 dark:text-white">{fmt(cliente.faturamento)}</p>
-                </div>
-
-                <div className="rounded-2xl bg-slate-50 p-3 dark:bg-slate-950">
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Ticket médio</p>
-                  <p className="mt-1 font-semibold text-slate-900 dark:text-white">{fmt(cliente.ticketMedio)}</p>
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-slate-200/70 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/70">
-                <p className="text-sm text-slate-700 dark:text-slate-200">
-                  <span className="font-semibold">Contato:</span> {cliente.contato}
-                </p>
-                <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
-                  <span className="font-semibold">Telefone:</span> {cliente.telefone}
-                </p>
-                <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
-                  <span className="font-semibold">E-mail:</span> {cliente.email}
-                </p>
-              </div>
-
-              <div className="mt-4">
-                <button
-                  onClick={() => setSelected(cliente)}
-                  className="erp-button-secondary px-3 py-2 text-xs"
-                >
-                  <Eye className="mr-1.5 h-4 w-4" />
-                  Ver detalhes
-                </button>
-              </div>
-            </div>
-          ))}
-
-          {filtrados.length === 0 && (
-            <div className="col-span-full rounded-3xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-              Nenhum cliente encontrado.
-            </div>
-          )}
-        </div>
-      </section>
-
-      {selected && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSelected(null)} />
-          <div className="relative z-10 w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
-            <div className="mb-6 flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
-                  Cliente
-                </p>
-                <h3 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">
-                  {selected.nome}
-                </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                  {selected.cidade}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setSelected(null)}
-                className="erp-button-secondary px-3 py-2 text-xs"
-              >
-                Fechar
+            {/* HEADER */}
+            <div className="flex justify-between items-center p-6 border-b">
+              <h2 className="text-xl font-bold">Novo Cliente</h2>
+              <button onClick={() => setOpen(false)}>
+                <X />
               </button>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <div className="erp-card p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Pedidos
-                </p>
-                <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
-                  {selected.pedidos}
-                </p>
+            <div className="p-6 space-y-6">
+
+              {/* DADOS */}
+              <div>
+                <h3 className="font-semibold mb-2">Dados</h3>
+
+                <input
+                  placeholder="Razão Social"
+                  className="erp-input mb-2"
+                  onChange={(e) =>
+                    setForm({ ...form, razao_social: e.target.value })
+                  }
+                />
+
+                <input
+                  placeholder="Nome Fantasia"
+                  className="erp-input"
+                  onChange={(e) =>
+                    setForm({ ...form, nome_fantasia: e.target.value })
+                  }
+                />
               </div>
 
-              <div className="erp-card p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Faturamento
-                </p>
-                <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
-                  {fmt(selected.faturamento)}
-                </p>
+              {/* ENDEREÇO */}
+              <div>
+                <h3 className="font-semibold mb-2">Endereço</h3>
+
+                <input
+                  placeholder="CEP"
+                  className="erp-input mb-2"
+                  onChange={(e) =>
+                    setForm({ ...form, cep: e.target.value })
+                  }
+                />
+
+                <input
+                  placeholder="Endereço"
+                  className="erp-input mb-2"
+                  onChange={(e) =>
+                    setForm({ ...form, endereco: e.target.value })
+                  }
+                />
+
+                <input
+                  placeholder="Cidade"
+                  className="erp-input"
+                  onChange={(e) =>
+                    setForm({ ...form, cidade: e.target.value })
+                  }
+                />
               </div>
 
-              <div className="erp-card p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Ticket médio
-                </p>
-                <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
-                  {fmt(selected.ticketMedio)}
-                </p>
+              {/* CONTATOS */}
+              <div>
+                <h3 className="font-semibold mb-2">Contato Comercial</h3>
+
+                <input
+                  placeholder="Nome"
+                  className="erp-input mb-2"
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      contato_comercial: e.target.value,
+                    })
+                  }
+                />
+
+                <input
+                  placeholder="Telefone"
+                  className="erp-input"
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      telefone_comercial: e.target.value,
+                    })
+                  }
+                />
               </div>
 
-              <div className="erp-card p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Entregues / prontos
-                </p>
-                <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">
-                  {selected.statusEntrega}
-                </p>
+              <div>
+                <h3 className="font-semibold mb-2">Contato Financeiro</h3>
+
+                <input
+                  placeholder="Nome"
+                  className="erp-input mb-2"
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      contato_financeiro: e.target.value,
+                    })
+                  }
+                />
+
+                <input
+                  placeholder="Telefone"
+                  className="erp-input"
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      telefone_financeiro: e.target.value,
+                    })
+                  }
+                />
               </div>
+
+              {/* BOTÃO */}
+              <button
+                onClick={salvar}
+                className="erp-button-primary w-full"
+              >
+                Cadastrar Cliente
+              </button>
+
             </div>
 
-            <div className="mt-4 erp-card p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Contatos
-              </p>
-              <p className="mt-2 text-sm text-slate-700 dark:text-slate-200">
-                {selected.contato} • {selected.telefone} • {selected.email}
-              </p>
-            </div>
           </div>
         </div>
       )}
