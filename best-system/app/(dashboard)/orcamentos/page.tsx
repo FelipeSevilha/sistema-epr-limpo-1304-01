@@ -1,406 +1,1022 @@
 'use client';
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
-import { supabase, Orcamento } from '@/lib/supabase';
-import { Plus, Search, ArrowRight, Clock, CircleCheck as CheckCircle, Circle as XCircle, RefreshCw, FileText, ShoppingCart } from 'lucide-react';
-import OrcamentoForm from '@/components/orcamentos/OrcamentoForm';
-import { imprimirProposta } from '@/components/orcamentos/propostaPDF';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Plus,
+  Search,
+  FileText,
+  DollarSign,
+  Clock3,
+  CircleCheck,
+  CircleX,
+  ChevronDown,
+  Eye,
+  Pencil,
+  Trash2,
+  Save,
+  X,
+  CheckCircle2,
+  Package,
+} from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
-const fmt = (v: number) =>
-  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
-
-const statusConfig: Record<string, { color: string; icon: React.ReactNode }> = {
-  Aguardando: { color: 'bg-amber-100 text-amber-700', icon: <Clock className="w-3.5 h-3.5" /> },
-  Aprovado: { color: 'bg-emerald-100 text-emerald-700', icon: <CheckCircle className="w-3.5 h-3.5" /> },
-  Recusado: { color: 'bg-red-100 text-red-700', icon: <XCircle className="w-3.5 h-3.5" /> },
-  Convertido: { color: 'bg-sky-100 text-sky-700', icon: <RefreshCw className="w-3.5 h-3.5" /> },
+type Cliente = {
+  id: string;
+  razao_social?: string | null;
+  nome_fantasia?: string | null;
+  contato_comercial?: string | null;
+  telefone_comercial?: string | null;
+  email_comercial?: string | null;
 };
 
-function gerarNumero(lista: Orcamento[]): string {
-  const now = new Date();
-  const yy = String(now.getFullYear()).slice(2);
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  const prefix = `${yy}${mm}.${dd}`;
-  const doDia = lista.filter(o => o.numero.startsWith(prefix)).length;
-  const seq = String(doDia + 1).padStart(2, '0');
-  return `${prefix}${seq}`;
+type Orcamento = {
+  id: string;
+  numero?: string | null;
+  cliente_id?: string | null;
+  cliente_nome?: string | null;
+  produto?: string | null;
+  descricao?: string | null;
+  quantidade?: number | null;
+  valor?: number | null;
+  status?: string | null;
+  motivo_perda?: string | null;
+  observacoes?: string | null;
+  vendedor?: string | null;
+  origem?: string | null;
+  validade?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type Pedido = {
+  id: string;
+  numero?: string | null;
+  cliente_id?: string | null;
+  cliente_nome?: string | null;
+  orcamento_id?: string | null;
+  orcamento_numero?: string | null;
+  produto?: string | null;
+  quantidade?: number | null;
+  valor?: number | null;
+  status?: string | null;
+  prazo?: string | null;
+  observacoes?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type FormData = {
+  cliente_id: string;
+  cliente_nome: string;
+  produto: string;
+  descricao: string;
+  quantidade: string;
+  valor: string;
+  status: string;
+  motivo_perda: string;
+  observacoes: string;
+  vendedor: string;
+  origem: string;
+  validade: string;
+};
+
+const initialForm: FormData = {
+  cliente_id: '',
+  cliente_nome: '',
+  produto: '',
+  descricao: '',
+  quantidade: '',
+  valor: '',
+  status: 'Em aberto',
+  motivo_perda: '',
+  observacoes: '',
+  vendedor: '',
+  origem: '',
+  validade: '',
+};
+
+const fmt = (v: number) =>
+  new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  }).format(v || 0);
+
+function formatDate(value?: string | null) {
+  if (!value) return '—';
+  const d = new Date(`${value}`.includes('T') ? value : `${value}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('pt-BR');
+}
+
+function nextNumero(orcamentos: Orcamento[]) {
+  const numeros = orcamentos
+    .map((o) => Number(String(o.numero || '').replace(/\D/g, '')))
+    .filter((n) => !Number.isNaN(n) && n > 0);
+
+  const max = numeros.length ? Math.max(...numeros) : 0;
+  return `ORC-${String(max + 1).padStart(4, '0')}`;
+}
+
+function statusClass(status?: string | null) {
+  const s = (status || '').toLowerCase();
+
+  if (['aprovado', 'convertido'].includes(s)) {
+    return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300';
+  }
+
+  if (['em aberto', 'aguardando retorno'].includes(s)) {
+    return 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300';
+  }
+
+  if (['perdido', 'cancelado'].includes(s)) {
+    return 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300';
+  }
+
+  return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
 }
 
 export default function OrcamentosPage() {
-  const [search, setSearch] = useState('');
-  const [filterStatus, setFilterStatus] = useState('Todos');
-  const [lista, setLista] = useState<Orcamento[]>([]);
+  const [orcamentos, setOrcamentos] = useState<Orcamento[]>([]);
+  const [clientes, setClientes] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
-  const [formOpen, setFormOpen] = useState(false);
-  const [editando, setEditando] = useState<Orcamento | null>(null);
-  const [convertendo, setConvertendo] = useState<Orcamento | null>(null);
-  const [convertLoading, setConvertLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const fetchOrcamentos = useCallback(async () => {
-    const { data } = await supabase
-      .from('orcamentos')
-      .select('*, orcamento_items(*)')
-      .order('created_at', { ascending: false });
-    if (data) setLista(data);
-    setLoading(false);
-  }, []);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Orcamento | null>(null);
+
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editing, setEditing] = useState<Orcamento | null>(null);
+  const [form, setForm] = useState<FormData>(initialForm);
+
+  const [clienteSearch, setClienteSearch] = useState('');
+  const [showClienteList, setShowClienteList] = useState(false);
+
+  async function fetchData() {
+    try {
+      setLoading(true);
+
+      const [orcRes, cliRes] = await Promise.all([
+        supabase.from('orcamentos').select('*').order('created_at', { ascending: false }),
+        supabase.from('clientes').select('*').order('razao_social', { ascending: true }),
+      ]);
+
+      setOrcamentos((orcRes.data as Orcamento[]) || []);
+      setClientes((cliRes.data as Cliente[]) || []);
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao carregar orçamentos.');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    fetchOrcamentos();
+    fetchData();
+  }, []);
 
-    const channel = supabase
-      .channel('orcamentos_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orcamentos' }, () => {
-        fetchOrcamentos();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orcamento_items' }, () => {
-        fetchOrcamentos();
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [fetchOrcamentos]);
-
-  const nextNumero = useMemo(() => gerarNumero(lista), [lista]);
-
-  const filtered = lista.filter(o => {
-    const matchSearch =
-      o.cliente_nome.toLowerCase().includes(search.toLowerCase()) ||
-      o.numero.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = filterStatus === 'Todos' || o.status === filterStatus;
-    return matchSearch && matchStatus;
-  });
-
-  const counts = {
-    total: lista.length,
-    aguardando: lista.filter(o => o.status === 'Aguardando').length,
-    aprovado: lista.filter(o => o.status === 'Aprovado').length,
-    convertido: lista.filter(o => o.status === 'Convertido').length,
-  };
-
-  const handleSave = async (data: {
-    numero: string;
-    cliente: string;
-    produto: string;
-    itens: Array<{ id: number | string; descricao: string; quantidade: number; valorUnit: number }>;
-    valor: number;
-    criacao: string;
-    validade: string;
-    status: string;
-    obs: string;
-  }) => {
-    if (editando) {
-      await supabase.from('orcamentos').update({
-        cliente_nome: data.cliente,
-        validade: data.validade,
-        status: data.status,
-        valor_total: data.valor,
-        observacoes: data.obs,
-        updated_at: new Date().toISOString(),
-      }).eq('id', editando.id);
-
-      await supabase.from('orcamento_items').delete().eq('orcamento_id', editando.id);
-      await supabase.from('orcamento_items').insert(
-        data.itens.map(i => ({
-          orcamento_id: editando.id,
-          descricao: i.descricao,
-          quantidade: i.quantidade,
-          valor_unitario: i.valorUnit,
-        }))
+  const filtrados = useMemo(() => {
+    return orcamentos.filter((orc) => {
+      const texto = search.toLowerCase();
+      return (
+        String(orc.numero || '').toLowerCase().includes(texto) ||
+        String(orc.cliente_nome || '').toLowerCase().includes(texto) ||
+        String(orc.produto || '').toLowerCase().includes(texto) ||
+        String(orc.status || '').toLowerCase().includes(texto) ||
+        String(orc.vendedor || '').toLowerCase().includes(texto)
       );
-    } else {
-      const { data: newOrc, error } = await supabase.from('orcamentos').insert({
-        numero: data.numero,
-        cliente_nome: data.cliente,
-        data: data.criacao,
-        validade: data.validade,
-        status: data.status,
-        valor_total: data.valor,
-        observacoes: data.obs,
-      }).select().maybeSingle();
+    });
+  }, [orcamentos, search]);
 
-      if (newOrc && !error) {
-        await supabase.from('orcamento_items').insert(
-          data.itens.map(i => ({
-            orcamento_id: newOrc.id,
-            descricao: i.descricao,
-            quantidade: i.quantidade,
-            valor_unitario: i.valorUnit,
-          }))
-        );
-      }
+  const resumo = useMemo(() => {
+    const total = orcamentos.length;
+    const abertos = orcamentos.filter((o) =>
+      ['Em aberto', 'Aguardando retorno'].includes(o.status || '')
+    ).length;
+    const aprovados = orcamentos.filter((o) =>
+      ['Aprovado', 'Convertido'].includes(o.status || '')
+    ).length;
+    const perdidos = orcamentos.filter((o) => (o.status || '') === 'Perdido').length;
+    const valorTotal = orcamentos.reduce((sum, o) => sum + Number(o.valor || 0), 0);
+
+    return { total, abertos, aprovados, perdidos, valorTotal };
+  }, [orcamentos]);
+
+  const clientesFiltrados = useMemo(() => {
+    const termo = clienteSearch.trim().toLowerCase();
+
+    if (!termo) return clientes.slice(0, 8);
+
+    return clientes
+      .filter((c) => {
+        const razao = (c.razao_social || '').toLowerCase();
+        const fantasia = (c.nome_fantasia || '').toLowerCase();
+        const email = (c.email_comercial || '').toLowerCase();
+        return razao.includes(termo) || fantasia.includes(termo) || email.includes(termo);
+      })
+      .slice(0, 8);
+  }, [clientes, clienteSearch]);
+
+  function updateForm<K extends keyof FormData>(field: K, value: FormData[K]) {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function openNewDrawer() {
+    setEditing(null);
+    setForm(initialForm);
+    setClienteSearch('');
+    setShowClienteList(false);
+    setDrawerOpen(true);
+  }
+
+  function openEditDrawer(orc: Orcamento) {
+    setEditing(orc);
+    setForm({
+      cliente_id: orc.cliente_id || '',
+      cliente_nome: orc.cliente_nome || '',
+      produto: orc.produto || '',
+      descricao: orc.descricao || '',
+      quantidade: String(orc.quantidade ?? ''),
+      valor: String(orc.valor ?? ''),
+      status: orc.status || 'Em aberto',
+      motivo_perda: orc.motivo_perda || '',
+      observacoes: orc.observacoes || '',
+      vendedor: orc.vendedor || '',
+      origem: orc.origem || '',
+      validade: orc.validade || '',
+    });
+    setClienteSearch(orc.cliente_nome || '');
+    setShowClienteList(false);
+    setDrawerOpen(true);
+  }
+
+  function closeDrawer() {
+    setDrawerOpen(false);
+    setEditing(null);
+    setForm(initialForm);
+    setClienteSearch('');
+    setShowClienteList(false);
+  }
+
+  function selecionarCliente(cliente: Cliente) {
+    const nome = cliente.razao_social || cliente.nome_fantasia || 'Cliente';
+    setForm((prev) => ({
+      ...prev,
+      cliente_id: cliente.id,
+      cliente_nome: nome,
+    }));
+    setClienteSearch(nome);
+    setShowClienteList(false);
+  }
+
+  function validarForm() {
+    if (!form.cliente_nome.trim()) {
+      alert('Informe o cliente.');
+      return false;
     }
-    setFormOpen(false);
-    setEditando(null);
-  };
 
-  const handleEdit = (o: Orcamento) => {
-    setEditando(o);
-    setFormOpen(true);
-  };
+    if (!form.produto.trim()) {
+      alert('Informe o produto.');
+      return false;
+    }
 
-  const handleConverter = async (o: Orcamento) => {
-    setConvertLoading(true);
-    const prazo = new Date();
-    prazo.setDate(prazo.getDate() + 10);
-    const produto = o.orcamento_items && o.orcamento_items.length > 0
-      ? o.orcamento_items[0].descricao + (o.orcamento_items.length > 1 ? ` + ${o.orcamento_items.length - 1} item(ns)` : '')
-      : 'Serviço gráfico';
-    const qtd = o.orcamento_items ? o.orcamento_items.reduce((s, i) => s + i.quantidade, 0) : 1;
+    if (!form.valor || Number(form.valor) <= 0) {
+      alert('Informe um valor válido.');
+      return false;
+    }
 
-    const { data: maxPed } = await supabase
-      .from('pedidos')
-      .select('numero')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    return true;
+  }
 
-    const lastNum = maxPed?.numero
-      ? parseInt(maxPed.numero.replace('#P-', ''), 10)
-      : 1000;
-    const novoPedidoNum = `#P-${String(lastNum + 1).padStart(4, '0')}`;
+  async function handleSave() {
+    if (!validarForm()) return;
 
-    await supabase.from('pedidos').insert({
-      numero: novoPedidoNum,
-      cliente_nome: o.cliente_nome,
-      orcamento_id: o.id,
-      orcamento_numero: o.numero,
-      produto,
-      quantidade: qtd,
-      valor: o.valor_total,
-      status: 'Aguardando',
-      prazo: prazo.toISOString().slice(0, 10),
-      observacoes: `Gerado do orçamento ${o.numero}. ${o.observacoes}`.trim(),
-    });
+    try {
+      setSaving(true);
 
-    await supabase.from('orcamentos').update({ status: 'Convertido' }).eq('id', o.id);
-    setConvertendo(null);
-    setConvertLoading(false);
-  };
+      const payload = {
+        cliente_id: form.cliente_id || null,
+        cliente_nome: form.cliente_nome.trim(),
+        produto: form.produto.trim(),
+        descricao: form.descricao.trim(),
+        quantidade: form.quantidade ? Number(form.quantidade) : 0,
+        valor: form.valor ? Number(form.valor) : 0,
+        status: form.status,
+        motivo_perda: form.motivo_perda.trim(),
+        observacoes: form.observacoes.trim(),
+        vendedor: form.vendedor.trim(),
+        origem: form.origem.trim(),
+        validade: form.validade || null,
+        updated_at: new Date().toISOString(),
+      };
 
-  const handleImprimirPDF = (o: Orcamento) => {
-    imprimirProposta({
-      id: `#O-${o.id}`,
-      numero: o.numero,
-      cliente: o.cliente_nome,
-      produto: o.orcamento_items?.[0]?.descricao ?? '',
-      itens: (o.orcamento_items ?? []).map(i => ({
-        id: i.id,
-        descricao: i.descricao,
-        quantidade: i.quantidade,
-        valorUnit: i.valor_unitario,
-      })),
-      valor: o.valor_total,
-      criacao: o.data,
-      validade: o.validade,
-      status: o.status,
-      obs: o.observacoes,
-    });
-  };
+      if (editing?.id) {
+        const { error } = await supabase
+          .from('orcamentos')
+          .update(payload)
+          .eq('id', editing.id);
+
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('orcamentos').insert({
+          numero: nextNumero(orcamentos),
+          ...payload,
+          created_at: new Date().toISOString(),
+        });
+
+        if (error) throw error;
+      }
+
+      closeDrawer();
+      fetchData();
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || 'Erro ao salvar orçamento.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    const confirmar = window.confirm('Deseja realmente excluir este orçamento?');
+    if (!confirmar) return;
+
+    try {
+      const { error } = await supabase.from('orcamentos').delete().eq('id', id);
+      if (error) throw error;
+      fetchData();
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || 'Erro ao excluir orçamento.');
+    }
+  }
+
+  async function handleUpdateStatus(id: string, status: string) {
+    try {
+      const payload: any = {
+        status,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (status !== 'Perdido') {
+        payload.motivo_perda = '';
+      }
+
+      const { error } = await supabase.from('orcamentos').update(payload).eq('id', id);
+      if (error) throw error;
+      fetchData();
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || 'Erro ao atualizar status.');
+    }
+  }
+
+  async function handleConverter(orc: Orcamento) {
+    try {
+      const confirmar = window.confirm(
+        `Converter o orçamento ${orc.numero || ''} em pedido?`
+      );
+      if (!confirmar) return;
+
+      const [{ data: pedidosData }, { error: insertError }] = await Promise.all([
+        supabase.from('pedidos').select('*'),
+        supabase.from('pedidos').insert({
+          numero: (() => {
+            const pedidos = (pedidosDataPlaceholder as Pedido[]) || [];
+            const numeros = pedidos
+              .map((p) => Number(String(p.numero || '').replace(/\D/g, '')))
+              .filter((n) => !Number.isNaN(n) && n > 0);
+            const max = numeros.length ? Math.max(...numeros) : 0;
+            return `P-${String(max + 1).padStart(4, '0')}`;
+          })(),
+          cliente_id: orc.cliente_id || null,
+          cliente_nome: orc.cliente_nome || '',
+          orcamento_id: orc.id,
+          orcamento_numero: orc.numero || '',
+          produto: orc.produto || '',
+          quantidade: Number(orc.quantidade || 0),
+          valor: Number(orc.valor || 0),
+          status: 'Aguardando',
+          prazo: null,
+          observacoes: orc.observacoes || '',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+      ]);
+
+      function pedidosDataPlaceholder() {
+        return pedidosData;
+      }
+
+      if (insertError) throw insertError;
+
+      const { error: updateError } = await supabase
+        .from('orcamentos')
+        .update({
+          status: 'Convertido',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', orc.id);
+
+      if (updateError) throw updateError;
+
+      alert('Orçamento convertido em pedido com sucesso.');
+      fetchData();
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || 'Erro ao converter orçamento.');
+    }
+  }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
+      <div className="flex h-64 items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        {[
-          { label: 'Total', value: counts.total, color: 'text-slate-800', bg: 'bg-white' },
-          { label: 'Aguardando', value: counts.aguardando, color: 'text-amber-600', bg: 'bg-amber-50' },
-          { label: 'Aprovados', value: counts.aprovado, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-          { label: 'Convertidos', value: counts.convertido, color: 'text-sky-600', bg: 'bg-sky-50' },
-        ].map(s => (
-          <div key={s.label} className={`rounded-xl border border-slate-200 p-4 ${s.bg} shadow-sm`}>
-            <p className="text-xs font-medium text-slate-500">{s.label}</p>
-            <p className={`text-3xl font-bold mt-1 ${s.color}`}>{s.value}</p>
+      <section className="grid grid-cols-2 gap-4 xl:grid-cols-5">
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Orçamentos
+            </p>
+            <FileText className="h-4 w-4 text-sky-500" />
           </div>
-        ))}
-      </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.total}</p>
+        </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Em aberto
+            </p>
+            <Clock3 className="h-4 w-4 text-amber-500" />
+          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.abertos}</p>
+        </div>
+
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Aprovados
+            </p>
+            <CircleCheck className="h-4 w-4 text-emerald-500" />
+          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.aprovados}</p>
+        </div>
+
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Perdidos
+            </p>
+            <CircleX className="h-4 w-4 text-red-500" />
+          </div>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.perdidos}</p>
+        </div>
+
+        <div className="erp-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Valor total
+            </p>
+            <DollarSign className="h-4 w-4 text-violet-500" />
+          </div>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">{fmt(resumo.valorTotal)}</p>
+        </div>
+      </section>
+
+      <section className="erp-card overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-slate-200/70 px-5 py-4 dark:border-slate-800 md:flex-row md:items-center md:justify-between">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Buscar orçamento..."
-              className="pl-9 pr-4 h-9 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-sky-500 w-56"
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar orçamento, cliente, produto ou vendedor..."
+              className="erp-input w-96 pl-10"
             />
           </div>
-          <div className="flex items-center gap-2">
-            <select
-              value={filterStatus}
-              onChange={e => setFilterStatus(e.target.value)}
-              className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:outline-none text-slate-600"
-            >
-              {['Todos', 'Aguardando', 'Aprovado', 'Recusado', 'Convertido'].map(s => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
-            <button
-              onClick={() => { setEditando(null); setFormOpen(true); }}
-              className="flex items-center gap-2 bg-sky-500 hover:bg-sky-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Novo Orçamento
-            </button>
-          </div>
+
+          <button
+            type="button"
+            onClick={openNewDrawer}
+            className="erp-button-primary"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Novo Orçamento
+          </button>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[1400px] text-sm">
             <thead>
-              <tr className="bg-slate-50">
-                {['Número', 'Cliente', 'Itens', 'Data', 'Validade', 'Valor', 'Status', 'Ações'].map(h => (
-                  <th key={h} className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{h}</th>
+              <tr className="bg-slate-50 dark:bg-slate-900/60">
+                {[
+                  'Orçamento',
+                  'Cliente',
+                  'Produto',
+                  'Qtd',
+                  'Valor',
+                  'Vendedor',
+                  'Origem',
+                  'Validade',
+                  'Status',
+                  'Ações',
+                ].map((h) => (
+                  <th
+                    key={h}
+                    className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+                  >
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filtered.map((o) => {
-                const sc = statusConfig[o.status];
-                const itemSummary = o.orcamento_items && o.orcamento_items.length > 0
-                  ? o.orcamento_items[0].descricao + (o.orcamento_items.length > 1 ? ` +${o.orcamento_items.length - 1}` : '')
-                  : '—';
-                return (
-                  <tr key={o.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-5 py-3 font-mono text-sky-600 font-medium">{o.numero}</td>
-                    <td className="px-5 py-3 text-slate-800 font-medium">{o.cliente_nome}</td>
-                    <td className="px-5 py-3 text-slate-500 max-w-48 truncate">{itemSummary}</td>
-                    <td className="px-5 py-3 text-slate-500">{new Date(o.data + 'T00:00:00').toLocaleDateString('pt-BR')}</td>
-                    <td className="px-5 py-3 text-slate-500">{new Date(o.validade + 'T00:00:00').toLocaleDateString('pt-BR')}</td>
-                    <td className="px-5 py-3 text-slate-800 font-semibold">{fmt(o.valor_total)}</td>
-                    <td className="px-5 py-3">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${sc?.color}`}>
-                        {sc?.icon}
-                        {o.status}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-3">
-                        <button onClick={() => handleEdit(o)} className="text-xs text-slate-500 hover:text-slate-700 font-medium">Editar</button>
-                        <button
-                          onClick={() => handleImprimirPDF(o)}
-                          className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 font-medium"
-                        >
-                          <FileText className="w-3 h-3" />
-                          PDF
-                        </button>
-                        {o.status !== 'Convertido' && (
-                          <button
-                            onClick={() => setConvertendo(o)}
-                            className="flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 font-semibold"
-                          >
-                            <ShoppingCart className="w-3 h-3" />
-                            Gerar Pedido
-                          </button>
-                        )}
-                        {o.status === 'Convertido' && (
-                          <span className="flex items-center gap-1 text-xs text-sky-500 font-medium">
-                            <ArrowRight className="w-3 h-3" />
-                            Convertido
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {filtrados.map((orc) => (
+                <tr
+                  key={orc.id}
+                  className="transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50"
+                >
+                  <td className="px-4 py-3 font-semibold text-sky-600 dark:text-sky-400">
+                    {orc.numero || '—'}
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={() => setSelected(orc)}
+                      className="text-left font-medium text-slate-900 dark:text-white"
+                    >
+                      {orc.cliente_nome || '—'}
+                    </button>
+                  </td>
+
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                    {orc.produto || '—'}
+                  </td>
+
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                    {Number(orc.quantidade || 0).toLocaleString('pt-BR')}
+                  </td>
+
+                  <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
+                    {fmt(Number(orc.valor || 0))}
+                  </td>
+
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                    {orc.vendedor || '—'}
+                  </td>
+
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                    {orc.origem || '—'}
+                  </td>
+
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                    {formatDate(orc.validade)}
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(orc.status)}`}>
+                      {orc.status || '—'}
+                    </span>
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelected(orc)}
+                        className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-sky-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-sky-400"
+                        title="Ver detalhes"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => openEditDrawer(orc)}
+                        className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-violet-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-violet-400"
+                        title="Editar"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+
+                      <select
+                        value={orc.status || 'Em aberto'}
+                        onChange={(e) => handleUpdateStatus(orc.id, e.target.value)}
+                        className="rounded-xl border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                      >
+                        <option>Em aberto</option>
+                        <option>Aguardando retorno</option>
+                        <option>Aprovado</option>
+                        <option>Perdido</option>
+                        <option>Convertido</option>
+                      </select>
+
+                      <button
+                        type="button"
+                        onClick={() => handleConverter(orc)}
+                        disabled={['Convertido'].includes(orc.status || '')}
+                        className={`inline-flex items-center justify-center rounded-2xl px-3 py-2 text-xs font-semibold transition ${
+                          ['Convertido'].includes(orc.status || '')
+                            ? 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500'
+                            : 'bg-emerald-500 text-white hover:bg-emerald-600'
+                        }`}
+                        title="Converter em pedido"
+                      >
+                        <Package className="mr-1.5 h-4 w-4" />
+                        {orc.status === 'Convertido' ? 'Convertido' : 'Converter'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(orc.id)}
+                        className="rounded-xl p-2 text-slate-500 transition hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                        title="Excluir"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+
+              {filtrados.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={10}
+                    className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400"
+                  >
+                    Nenhum orçamento encontrado.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
-          {filtered.length === 0 && (
-            <div className="text-center py-12 text-slate-400 text-sm">Nenhum orçamento encontrado.</div>
-          )}
         </div>
-      </div>
+      </section>
 
-      {convertendo && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !convertLoading && setConvertendo(null)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div className="px-6 py-5 border-b border-slate-100">
-              <div className="flex items-center gap-3 mb-1">
-                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
-                  <ShoppingCart className="w-5 h-5 text-emerald-600" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-slate-800">Gerar Pedido</h3>
-                  <p className="text-xs text-slate-400">Orçamento {convertendo.numero}</p>
-                </div>
+      {selected && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSelected(null)} />
+          <div className="relative z-10 w-full max-w-4xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+                  Orçamento
+                </p>
+                <h3 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">
+                  {selected.numero || '—'}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  {selected.cliente_nome || '—'}
+                </p>
               </div>
-            </div>
-            <div className="p-6 space-y-3">
-              <div className="bg-slate-50 rounded-xl p-4 space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">Cliente</span>
-                  <span className="font-semibold text-slate-800">{convertendo.cliente_nome}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">Valor</span>
-                  <span className="font-semibold text-slate-800">{fmt(convertendo.valor_total)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">Itens</span>
-                  <span className="text-slate-600">{convertendo.orcamento_items?.length ?? 0} item(s)</span>
-                </div>
-              </div>
-              <p className="text-xs text-slate-400 text-center">Um pedido será criado com status <strong>Aguardando</strong> e prazo de 10 dias.</p>
-            </div>
-            <div className="flex gap-3 px-6 pb-6">
+
               <button
-                onClick={() => setConvertendo(null)}
-                disabled={convertLoading}
-                className="flex-1 py-2.5 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                type="button"
+                onClick={() => setSelected(null)}
+                className="erp-button-secondary px-3 py-2 text-xs"
               >
-                Cancelar
+                Fechar
               </button>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="erp-card p-4">
+                <p className="text-xs text-slate-500 dark:text-slate-400">Produto</p>
+                <p className="mt-1 font-semibold text-slate-900 dark:text-white">{selected.produto || '—'}</p>
+              </div>
+
+              <div className="erp-card p-4">
+                <p className="text-xs text-slate-500 dark:text-slate-400">Quantidade</p>
+                <p className="mt-1 font-semibold text-slate-900 dark:text-white">
+                  {Number(selected.quantidade || 0).toLocaleString('pt-BR')}
+                </p>
+              </div>
+
+              <div className="erp-card p-4">
+                <p className="text-xs text-slate-500 dark:text-slate-400">Valor</p>
+                <p className="mt-1 font-semibold text-slate-900 dark:text-white">
+                  {fmt(Number(selected.valor || 0))}
+                </p>
+              </div>
+
+              <div className="erp-card p-4">
+                <p className="text-xs text-slate-500 dark:text-slate-400">Status</p>
+                <div className="mt-2">
+                  <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(selected.status)}`}>
+                    {selected.status || '—'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <div className="erp-card p-5">
+                <h4 className="mb-3 text-base font-bold text-slate-900 dark:text-white">
+                  Informações comerciais
+                </h4>
+                <div className="space-y-2 text-sm text-slate-700 dark:text-slate-200">
+                  <p><span className="font-semibold">Vendedor:</span> {selected.vendedor || '—'}</p>
+                  <p><span className="font-semibold">Origem:</span> {selected.origem || '—'}</p>
+                  <p><span className="font-semibold">Validade:</span> {formatDate(selected.validade)}</p>
+                  <p><span className="font-semibold">Criado em:</span> {formatDate(selected.created_at)}</p>
+                </div>
+              </div>
+
+              <div className="erp-card p-5">
+                <h4 className="mb-3 text-base font-bold text-slate-900 dark:text-white">
+                  Motivo da perda / observações
+                </h4>
+                <div className="space-y-3 text-sm text-slate-700 dark:text-slate-200">
+                  <p><span className="font-semibold">Motivo da perda:</span> {selected.motivo_perda || '—'}</p>
+                  <p><span className="font-semibold">Observações:</span> {selected.observacoes || '—'}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end gap-3">
               <button
-                onClick={() => handleConverter(convertendo)}
-                disabled={convertLoading}
-                className="flex-1 py-2.5 text-sm bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2"
+                type="button"
+                onClick={() => openEditDrawer(selected)}
+                className="erp-button-secondary"
               >
-                {convertLoading ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <ShoppingCart className="w-4 h-4" />
-                )}
-                {convertLoading ? 'Gerando...' : 'Confirmar'}
+                <Pencil className="mr-2 h-4 w-4" />
+                Editar
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleConverter(selected)}
+                disabled={selected.status === 'Convertido'}
+                className={`erp-button-primary ${selected.status === 'Convertido' ? 'cursor-not-allowed opacity-70' : ''}`}
+              >
+                <CheckCircle2 className="mr-2 h-4 w-4" />
+                {selected.status === 'Convertido' ? 'Já convertido' : 'Converter em pedido'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      <OrcamentoForm
-        open={formOpen}
-        onClose={() => { setFormOpen(false); setEditando(null); }}
-        onSave={handleSave}
-        orcamento={editando ? {
-          id: `#O-${editando.id}`,
-          numero: editando.numero,
-          cliente: editando.cliente_nome,
-          produto: '',
-          itens: (editando.orcamento_items ?? []).map(i => ({
-            id: i.id,
-            descricao: i.descricao,
-            quantidade: i.quantidade,
-            valorUnit: i.valor_unitario,
-          })),
-          valor: editando.valor_total,
-          criacao: editando.data,
-          validade: editando.validade,
-          status: editando.status,
-          obs: editando.observacoes,
-        } : null}
-        nextNumero={nextNumero}
-      />
+      {drawerOpen && (
+        <div className="fixed inset-0 z-50 flex">
+          <div className="flex-1 bg-black/40 backdrop-blur-sm" onClick={closeDrawer} />
+
+          <div className="h-full w-full max-w-[760px] overflow-y-auto border-l border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+            <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-6 py-5 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+                    Orçamentos
+                  </p>
+                  <h2 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">
+                    {editing ? 'Editar Orçamento' : 'Novo Orçamento'}
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                    Cadastro completo do orçamento
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={closeDrawer}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition hover:text-red-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-6 p-6">
+              <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <div className="mb-4 flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-sky-500" />
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Dados do orçamento
+                  </h3>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="md:col-span-2">
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                      Cliente
+                    </label>
+
+                    <div className="relative">
+                      <input
+                        value={clienteSearch}
+                        onFocus={() => setShowClienteList(true)}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setClienteSearch(value);
+                          setShowClienteList(true);
+                          setForm((prev) => ({
+                            ...prev,
+                            cliente_id: '',
+                            cliente_nome: value,
+                          }));
+                        }}
+                        placeholder="Digite o nome do cliente"
+                        className="erp-input w-full"
+                      />
+                    </div>
+
+                    {showClienteList && clienteSearch.trim() && clientesFiltrados.length > 0 && (
+                      <div className="mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                        {clientesFiltrados.map((cliente) => {
+                          const nome = cliente.razao_social || cliente.nome_fantasia || 'Cliente';
+                          return (
+                            <button
+                              key={cliente.id}
+                              type="button"
+                              onClick={() => selecionarCliente(cliente)}
+                              className="block w-full border-b border-slate-100 px-4 py-3 text-left text-sm text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800 last:border-b-0"
+                            >
+                              <div className="font-medium">{nome}</div>
+                              {cliente.email_comercial ? (
+                                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                  {cliente.email_comercial}
+                                </div>
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                      Produto
+                    </label>
+                    <input
+                      value={form.produto}
+                      onChange={(e) => updateForm('produto', e.target.value)}
+                      className="erp-input w-full"
+                      placeholder="Digite o produto"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                      Descrição
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={form.descricao}
+                      onChange={(e) => updateForm('descricao', e.target.value)}
+                      className="erp-input w-full"
+                      placeholder="Detalhes do orçamento"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                      Quantidade
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.quantidade}
+                      onChange={(e) => updateForm('quantidade', e.target.value)}
+                      className="erp-input w-full"
+                      placeholder="0"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                      Valor
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.valor}
+                      onChange={(e) => updateForm('valor', e.target.value)}
+                      className="erp-input w-full"
+                      placeholder="0,00"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                      Vendedor
+                    </label>
+                    <input
+                      value={form.vendedor}
+                      onChange={(e) => updateForm('vendedor', e.target.value)}
+                      className="erp-input w-full"
+                      placeholder="Nome do vendedor"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                      Origem
+                    </label>
+                    <input
+                      value={form.origem}
+                      onChange={(e) => updateForm('origem', e.target.value)}
+                      className="erp-input w-full"
+                      placeholder="Instagram, WhatsApp, site..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                      Validade
+                    </label>
+                    <input
+                      type="date"
+                      value={form.validade}
+                      onChange={(e) => updateForm('validade', e.target.value)}
+                      className="erp-input w-full"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                      Status
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={form.status}
+                        onChange={(e) => updateForm('status', e.target.value)}
+                        className="erp-input w-full appearance-none"
+                      >
+                        <option>Em aberto</option>
+                        <option>Aguardando retorno</option>
+                        <option>Aprovado</option>
+                        <option>Perdido</option>
+                        <option>Convertido</option>
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    </div>
+                  </div>
+
+                  {(form.status === 'Perdido' || editing?.status === 'Perdido') && (
+                    <div className="md:col-span-2">
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                        Motivo da perda
+                      </label>
+                      <input
+                        value={form.motivo_perda}
+                        onChange={(e) => updateForm('motivo_perda', e.target.value)}
+                        className="erp-input w-full"
+                        placeholder="Preço, prazo, concorrência..."
+                      />
+                    </div>
+                  )}
+
+                  <div className="md:col-span-2">
+                    <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
+                      Observações
+                    </label>
+                    <textarea
+                      rows={4}
+                      value={form.observacoes}
+                      onChange={(e) => updateForm('observacoes', e.target.value)}
+                      className="erp-input w-full"
+                      placeholder="Observações internas do orçamento"
+                    />
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <div className="sticky bottom-0 border-t border-slate-200 bg-white/95 px-6 py-4 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={closeDrawer}
+                  className="erp-button-secondary"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={saving}
+                  className={`erp-button-primary ${saving ? 'cursor-not-allowed opacity-70' : ''}`}
+                >
+                  <Save className="mr-2 h-4 w-4" />
+                  {saving ? 'Salvando...' : editing ? 'Atualizar Orçamento' : 'Cadastrar Orçamento'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
