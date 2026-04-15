@@ -1,188 +1,316 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Plus, Eye, Pencil, Save, X } from 'lucide-react';
-
-type ClienteRow = {
-  id: string;
-  razao_social?: string;
-  nome_fantasia?: string;
-
-  contato_financeiro?: string;
-  telefone_financeiro?: string;
-  email_financeiro?: string;
-
-  contato_compras?: string;
-  telefone_compras?: string;
-  email_compras?: string;
-
-  ativo?: boolean;
-};
+import { X } from 'lucide-react';
 
 export default function ClientesPage() {
-  const [clientes, setClientes] = useState<ClienteRow[]>([]);
-  const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<ClienteRow | null>(null);
+  const [open, setOpen] = useState(false);
 
   const [form, setForm] = useState<any>({
     razao_social: '',
     nome_fantasia: '',
+    cnpj: '',
+    ie: '',
+
+    cep: '',
+    endereco: '',
+    numero: '',
+    bairro: '',
+    cidade: '',
+    estado: 'SP',
+
+    contato_comercial: '',
+    telefone_comercial: '',
+    email_comercial: '',
 
     contato_financeiro: '',
     telefone_financeiro: '',
     email_financeiro: '',
 
-    contato_compras: '',
-    telefone_compras: '',
-    email_compras: '',
+    observacoes: '',
   });
 
-  async function fetchClientes() {
-    const { data } = await supabase
-      .from('clientes')
-      .select('*')
-      .order('razao_social');
+  /* =========================
+     FORMATADORES
+  ========================= */
 
-    setClientes(data || []);
+  function formatCNPJ(value: string) {
+    return value
+      .replace(/\D/g, '')
+      .replace(/^(\d{2})(\d)/, '$1.$2')
+      .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+      .replace(/\.(\d{3})(\d)/, '.$1/$2')
+      .replace(/(\d{4})(\d)/, '$1-$2')
+      .slice(0, 18);
   }
 
-  useEffect(() => {
-    fetchClientes();
-  }, []);
-
-  function openNovo() {
-    setEditing(null);
-    setForm({
-      razao_social: '',
-      nome_fantasia: '',
-      contato_financeiro: '',
-      telefone_financeiro: '',
-      email_financeiro: '',
-      contato_compras: '',
-      telefone_compras: '',
-      email_compras: '',
-    });
-    setFormOpen(true);
+  function formatPhone(value: string) {
+    return value
+      .replace(/\D/g, '')
+      .replace(/^(\d{2})(\d)/, '($1) $2')
+      .replace(/(\d{5})(\d)/, '$1-$2')
+      .slice(0, 15);
   }
 
-  function openEditar(cliente: ClienteRow) {
-    setEditing(cliente);
-    setForm(cliente);
-    setFormOpen(true);
+  function formatCEP(value: string) {
+    return value
+      .replace(/\D/g, '')
+      .replace(/^(\d{5})(\d)/, '$1-$2')
+      .slice(0, 9);
   }
 
-  async function salvar() {
+  /* =========================
+     BUSCAR CEP
+  ========================= */
+
+  async function buscarCEP() {
+    if (form.cep.length < 8) return;
+
+    const cep = form.cep.replace(/\D/g, '');
+
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+      const data = await res.json();
+
+      if (data.erro) {
+        alert('CEP não encontrado');
+        return;
+      }
+
+      setForm((prev: any) => ({
+        ...prev,
+        endereco: data.logradouro,
+        bairro: data.bairro,
+        cidade: data.localidade,
+        estado: data.uf,
+      }));
+    } catch {
+      alert('Erro ao buscar CEP');
+    }
+  }
+
+  /* =========================
+     VALIDAÇÃO
+  ========================= */
+
+  function validar() {
     if (!form.razao_social) {
       alert('Razão social obrigatória');
-      return;
+      return false;
     }
 
-    if (editing) {
-      await supabase.from('clientes').update(form).eq('id', editing.id);
-    } else {
-      await supabase.from('clientes').insert({
+    if (form.cnpj.length < 18) {
+      alert('CNPJ inválido');
+      return false;
+    }
+
+    if (form.telefone_comercial.length < 14) {
+      alert('Telefone comercial inválido');
+      return false;
+    }
+
+    return true;
+  }
+
+  /* =========================
+     SALVAR
+  ========================= */
+
+  async function salvar() {
+    if (!validar()) return;
+
+    try {
+      const { error } = await supabase.from('clientes').insert({
         ...form,
-        ativo: true,
         created_at: new Date().toISOString(),
       });
-    }
 
-    setFormOpen(false);
-    fetchClientes();
+      if (error) throw error;
+
+      alert('Cliente cadastrado!');
+      setOpen(false);
+    } catch (err: any) {
+      alert(err.message);
+    }
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6">
 
-      {/* HEADER */}
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Clientes</h1>
+      <button onClick={() => setOpen(true)} className="erp-button-primary">
+        Novo Cliente
+      </button>
 
-        <button onClick={openNovo} className="erp-button-primary flex gap-2">
-          <Plus className="h-4 w-4" />
-          Novo Cliente
-        </button>
-      </div>
+      {open && (
+        <div className="fixed inset-0 bg-black/40 flex justify-center items-start py-10 z-50">
 
-      {/* LISTA */}
-      <div className="erp-card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-slate-50 dark:bg-slate-900">
-              <th className="p-3 text-left">Cliente</th>
-              <th className="p-3">Financeiro</th>
-              <th className="p-3">Compras</th>
-              <th className="p-3">Ações</th>
-            </tr>
-          </thead>
+          <div className="bg-white dark:bg-slate-900 w-[800px] rounded-3xl shadow-xl">
 
-          <tbody>
-            {clientes.map((c) => (
-              <tr key={c.id} className="border-t">
-                <td className="p-3">
-                  <div className="font-semibold">{c.razao_social}</div>
-                  <div className="text-xs text-slate-500">{c.nome_fantasia}</div>
-                </td>
+            {/* HEADER */}
+            <div className="flex justify-between items-center p-6 border-b">
+              <h2 className="text-xl font-bold">Novo Cliente</h2>
+              <button onClick={() => setOpen(false)}>
+                <X />
+              </button>
+            </div>
 
-                <td className="p-3 text-center">
-                  <div>{c.contato_financeiro}</div>
-                  <div className="text-xs">{c.telefone_financeiro}</div>
-                  <div className="text-xs">{c.email_financeiro}</div>
-                </td>
+            <div className="p-6 space-y-6">
 
-                <td className="p-3 text-center">
-                  <div>{c.contato_compras}</div>
-                  <div className="text-xs">{c.telefone_compras}</div>
-                  <div className="text-xs">{c.email_compras}</div>
-                </td>
-
-                <td className="p-3 text-center">
-                  <button
-                    onClick={() => openEditar(c)}
-                    className="erp-button-secondary text-xs"
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* MODAL */}
-      {formOpen && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/40">
-          <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl w-[600px] space-y-4">
-
-            <h2 className="text-xl font-bold">
-              {editing ? 'Editar Cliente' : 'Novo Cliente'}
-            </h2>
-
-            <input
-              placeholder="Razão Social"
-              className="erp-input"
-              value={form.razao_social}
-              onChange={(e) => setForm({ ...form, razao_social: e.target.value })}
-            />
-
-            <input
-              placeholder="Nome Fantasia"
-              className="erp-input"
-              value={form.nome_fantasia}
-              onChange={(e) => setForm({ ...form, nome_fantasia: e.target.value })}
-            />
-
-            <div className="grid grid-cols-2 gap-4">
-
-              {/* FINANCEIRO */}
+              {/* DADOS */}
               <div>
-                <h3 className="font-semibold mb-2">Financeiro</h3>
+                <h3 className="font-semibold mb-3">Dados da Empresa</h3>
 
                 <input
-                  placeholder="Contato"
+                  placeholder="Razão Social"
+                  className="erp-input mb-2"
+                  value={form.razao_social}
+                  onChange={(e) =>
+                    setForm({ ...form, razao_social: e.target.value })
+                  }
+                />
+
+                <input
+                  placeholder="Nome Fantasia"
+                  className="erp-input mb-2"
+                  value={form.nome_fantasia}
+                  onChange={(e) =>
+                    setForm({ ...form, nome_fantasia: e.target.value })
+                  }
+                />
+
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    placeholder="CNPJ"
+                    className="erp-input"
+                    value={form.cnpj}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        cnpj: formatCNPJ(e.target.value),
+                      })
+                    }
+                  />
+
+                  <input
+                    placeholder="IE"
+                    className="erp-input"
+                    value={form.ie}
+                    onChange={(e) =>
+                      setForm({ ...form, ie: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+
+              {/* ENDEREÇO */}
+              <div>
+                <h3 className="font-semibold mb-3">Endereço</h3>
+
+                <div className="flex gap-2">
+                  <input
+                    placeholder="CEP"
+                    className="erp-input w-full"
+                    value={form.cep}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        cep: formatCEP(e.target.value),
+                      })
+                    }
+                  />
+
+                  <button
+                    onClick={buscarCEP}
+                    className="erp-button-primary"
+                  >
+                    Buscar
+                  </button>
+                </div>
+
+                <input
+                  placeholder="Endereço"
+                  className="erp-input mt-2"
+                  value={form.endereco}
+                  onChange={(e) =>
+                    setForm({ ...form, endereco: e.target.value })
+                  }
+                />
+
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <input
+                    placeholder="Número"
+                    className="erp-input"
+                    value={form.numero}
+                    onChange={(e) =>
+                      setForm({ ...form, numero: e.target.value })
+                    }
+                  />
+
+                  <input
+                    placeholder="Bairro"
+                    className="erp-input"
+                    value={form.bairro}
+                    onChange={(e) =>
+                      setForm({ ...form, bairro: e.target.value })
+                    }
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <input
+                    placeholder="Cidade"
+                    className="erp-input"
+                    value={form.cidade}
+                    onChange={(e) =>
+                      setForm({ ...form, cidade: e.target.value })
+                    }
+                  />
+
+                  <input
+                    placeholder="Estado"
+                    className="erp-input"
+                    value={form.estado}
+                    onChange={(e) =>
+                      setForm({ ...form, estado: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+
+              {/* CONTATO COMERCIAL */}
+              <div>
+                <h3 className="font-semibold mb-3">Contato Comercial</h3>
+
+                <input
+                  placeholder="Nome"
+                  className="erp-input mb-2"
+                  value={form.contato_comercial}
+                  onChange={(e) =>
+                    setForm({ ...form, contato_comercial: e.target.value })
+                  }
+                />
+
+                <input
+                  placeholder="Telefone"
                   className="erp-input"
+                  value={form.telefone_comercial}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      telefone_comercial: formatPhone(e.target.value),
+                    })
+                  }
+                />
+              </div>
+
+              {/* CONTATO FINANCEIRO */}
+              <div>
+                <h3 className="font-semibold mb-3">Contato Financeiro</h3>
+
+                <input
+                  placeholder="Nome"
+                  className="erp-input mb-2"
                   value={form.contato_financeiro}
                   onChange={(e) =>
                     setForm({ ...form, contato_financeiro: e.target.value })
@@ -191,71 +319,33 @@ export default function ClientesPage() {
 
                 <input
                   placeholder="Telefone"
-                  className="erp-input mt-2"
+                  className="erp-input"
                   value={form.telefone_financeiro}
                   onChange={(e) =>
-                    setForm({ ...form, telefone_financeiro: e.target.value })
-                  }
-                />
-
-                <input
-                  placeholder="Email"
-                  className="erp-input mt-2"
-                  value={form.email_financeiro}
-                  onChange={(e) =>
-                    setForm({ ...form, email_financeiro: e.target.value })
-                  }
-                />
-              </div>
-
-              {/* COMPRAS */}
-              <div>
-                <h3 className="font-semibold mb-2">Compras</h3>
-
-                <input
-                  placeholder="Contato"
-                  className="erp-input"
-                  value={form.contato_compras}
-                  onChange={(e) =>
-                    setForm({ ...form, contato_compras: e.target.value })
-                  }
-                />
-
-                <input
-                  placeholder="Telefone"
-                  className="erp-input mt-2"
-                  value={form.telefone_compras}
-                  onChange={(e) =>
-                    setForm({ ...form, telefone_compras: e.target.value })
-                  }
-                />
-
-                <input
-                  placeholder="Email"
-                  className="erp-input mt-2"
-                  value={form.email_compras}
-                  onChange={(e) =>
-                    setForm({ ...form, email_compras: e.target.value })
+                    setForm({
+                      ...form,
+                      telefone_financeiro: formatPhone(e.target.value),
+                    })
                   }
                 />
               </div>
 
             </div>
 
-            <div className="flex gap-2">
+            {/* FOOTER */}
+            <div className="flex justify-end gap-2 p-6 border-t">
               <button
-                onClick={() => setFormOpen(false)}
-                className="erp-button-secondary w-full"
+                onClick={() => setOpen(false)}
+                className="erp-button-secondary"
               >
                 Cancelar
               </button>
 
               <button
                 onClick={salvar}
-                className="erp-button-primary w-full"
+                className="erp-button-primary"
               >
-                <Save className="h-4 w-4" />
-                Salvar
+                Cadastrar Cliente
               </button>
             </div>
 
