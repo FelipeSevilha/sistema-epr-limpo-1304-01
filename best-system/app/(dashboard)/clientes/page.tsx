@@ -2,85 +2,210 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { X, Search } from 'lucide-react';
+import { Pencil, Trash2, Plus, AlertTriangle } from 'lucide-react';
 
 export default function ClientesPage() {
+  const [clientes, setClientes] = useState<any[]>([]);
+  const [pedidos, setPedidos] = useState<any[]>([]);
+  const [financeiro, setFinanceiro] = useState<any[]>([]);
+
   const [open, setOpen] = useState(false);
-
-  const [form, setForm] = useState<any>({
-    razao_social: '',
-    nome_fantasia: '',
-    cnpj: '',
-    ie: '',
-    setor: '',
-    status: true,
-
-    cep: '',
-    endereco: '',
-    numero: '',
-    complemento: '',
-    bairro: '',
-    cidade: '',
-    estado: 'SP',
-
-    contato_comercial: '',
-    telefone_comercial: '',
-    email_comercial: '',
-
-    contato_financeiro: '',
-    telefone_financeiro: '',
-    email_financeiro: '',
-
-    observacoes: '',
-  });
+  const [editing, setEditing] = useState<any>(null);
+  const [form, setForm] = useState<any>({});
 
   /* =========================
-     BUSCAR CEP (ViaCEP)
+     LOAD
   ========================= */
 
-  async function buscarCEP() {
-    const cep = form.cep.replace(/\D/g, '');
-    if (cep.length < 8) return;
+  async function load() {
+    const [c, p, f] = await Promise.all([
+      supabase.from('clientes').select('*'),
+      supabase.from('pedidos').select('*'),
+      supabase.from('contas_receber').select('*'),
+    ]);
 
-    const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
-    const data = await res.json();
+    setClientes(c.data || []);
+    setPedidos(p.data || []);
+    setFinanceiro(f.data || []);
+  }
 
-    if (!data.erro) {
-      setForm({
-        ...form,
-        endereco: data.logradouro,
-        bairro: data.bairro,
-        cidade: data.localidade,
-        estado: data.uf,
-      });
-    }
+  useEffect(() => {
+    load();
+  }, []);
+
+  /* =========================
+     MÉTRICAS
+  ========================= */
+
+  function getStats(cliente: any) {
+    const pedidosCliente = pedidos.filter(
+      (p) => p.cliente_nome === cliente.razao_social
+    );
+
+    const faturamento = pedidosCliente.reduce(
+      (acc, p) => acc + (p.valor || 0),
+      0
+    );
+
+    const aberto = financeiro
+      .filter(
+        (f) =>
+          f.cliente_nome === cliente.razao_social &&
+          f.status !== 'pago'
+      )
+      .reduce((acc, f) => acc + (f.valor || 0), 0);
+
+    return {
+      pedidos: pedidosCliente.length,
+      faturamento,
+      ticket:
+        pedidosCliente.length > 0
+          ? faturamento / pedidosCliente.length
+          : 0,
+      aberto,
+    };
+  }
+
+  function getBadge(faturamento: number) {
+    if (faturamento > 20000) return 'VIP';
+    if (faturamento > 5000) return 'Alto Valor';
+    return 'Normal';
   }
 
   /* =========================
-     SALVAR
+     CRUD
   ========================= */
 
-  async function salvar() {
-    await supabase.from('clientes').insert({
-      ...form,
-      created_at: new Date().toISOString(),
-    });
+  function novo() {
+    setEditing(null);
+    setForm({});
+    setOpen(true);
+  }
 
-    alert('Cliente cadastrado!');
+  function editar(c: any) {
+    setEditing(c);
+    setForm(c);
+    setOpen(true);
+  }
+
+  async function salvar() {
+    if (editing) {
+      await supabase
+        .from('clientes')
+        .update(form)
+        .eq('id', editing.id);
+    } else {
+      await supabase.from('clientes').insert({
+        ...form,
+        created_at: new Date().toISOString(),
+      });
+    }
+
     setOpen(false);
-    location.reload();
+    load();
+  }
+
+  async function excluir(id: string) {
+    if (!confirm('Excluir cliente?')) return;
+
+    await supabase.from('clientes').delete().eq('id', id);
+    load();
   }
 
   return (
-    <div className="p-6">
+    <div className="p-6 space-y-6">
 
-      {/* BOTÃO */}
-      <button
-        onClick={() => setOpen(true)}
-        className="erp-button-primary"
-      >
-        Novo Cliente
-      </button>
+      {/* HEADER */}
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Clientes</h1>
+
+        <button onClick={novo} className="erp-button-primary flex gap-2">
+          <Plus size={16} />
+          Novo Cliente
+        </button>
+      </div>
+
+      {/* GRID */}
+      <div className="grid grid-cols-3 gap-4">
+
+        {clientes.map((c) => {
+          const stats = getStats(c);
+          const badge = getBadge(stats.faturamento);
+
+          return (
+            <div
+              key={c.id}
+              className="erp-card p-4 space-y-3 relative"
+            >
+
+              {/* ALERTA */}
+              {stats.aberto > 0 && (
+                <div className="absolute top-2 right-2 text-red-500">
+                  <AlertTriangle size={16} />
+                </div>
+              )}
+
+              {/* HEADER */}
+              <div className="flex justify-between items-center">
+                <h3 className="font-bold">{c.razao_social}</h3>
+
+                <span className="text-xs bg-slate-200 px-2 py-1 rounded">
+                  {badge}
+                </span>
+              </div>
+
+              {/* CONTATO */}
+              <div className="text-sm text-slate-500">
+                {c.telefone_comercial}
+              </div>
+
+              {/* MÉTRICAS */}
+              <div className="grid grid-cols-2 gap-2 text-xs">
+
+                <div>
+                  <strong>Pedidos:</strong> {stats.pedidos}
+                </div>
+
+                <div>
+                  <strong>Ticket:</strong>{' '}
+                  R$ {stats.ticket.toFixed(0)}
+                </div>
+
+                <div>
+                  <strong>Faturamento:</strong>{' '}
+                  R$ {stats.faturamento.toFixed(0)}
+                </div>
+
+                <div className="text-red-500">
+                  <strong>Em aberto:</strong>{' '}
+                  R$ {stats.aberto.toFixed(0)}
+                </div>
+
+              </div>
+
+              {/* AÇÕES */}
+              <div className="flex gap-2 pt-2">
+
+                <button
+                  onClick={() => editar(c)}
+                  className="erp-button-secondary"
+                >
+                  <Pencil size={14} />
+                </button>
+
+                <button
+                  onClick={() => excluir(c.id)}
+                  className="erp-button-secondary text-red-500"
+                >
+                  <Trash2 size={14} />
+                </button>
+
+              </div>
+
+            </div>
+          );
+        })}
+      </div>
 
       {/* SIDEBAR */}
       {open && (
@@ -91,232 +216,39 @@ export default function ClientesPage() {
             onClick={() => setOpen(false)}
           />
 
-          <div className="w-[520px] bg-white dark:bg-slate-900 h-full overflow-auto shadow-2xl">
+          <div className="w-[520px] bg-white p-6">
 
-            {/* HEADER */}
-            <div className="flex justify-between items-center p-6 border-b">
-              <div>
-                <h2 className="text-xl font-bold">Novo Cliente</h2>
-                <p className="text-sm text-slate-500">
-                  Preencha os dados cadastrais
-                </p>
-              </div>
+            <h2 className="text-xl font-bold mb-4">
+              {editing ? 'Editar Cliente' : 'Novo Cliente'}
+            </h2>
 
-              <button onClick={() => setOpen(false)}>
-                <X />
-              </button>
-            </div>
+            <input
+              placeholder="Razão Social"
+              className="erp-input mb-2"
+              value={form.razao_social || ''}
+              onChange={(e) =>
+                setForm({ ...form, razao_social: e.target.value })
+              }
+            />
 
-            <div className="p-6 space-y-6">
+            <input
+              placeholder="Telefone"
+              className="erp-input mb-2"
+              value={form.telefone_comercial || ''}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  telefone_comercial: e.target.value,
+                })
+              }
+            />
 
-              {/* DADOS */}
-              <div>
-                <h3 className="font-semibold mb-3">Dados da Empresa</h3>
-
-                <input
-                  placeholder="Razão Social"
-                  className="erp-input mb-2"
-                  onChange={(e) =>
-                    setForm({ ...form, razao_social: e.target.value })
-                  }
-                />
-
-                <input
-                  placeholder="Nome Fantasia"
-                  className="erp-input mb-2"
-                  onChange={(e) =>
-                    setForm({ ...form, nome_fantasia: e.target.value })
-                  }
-                />
-
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    placeholder="CNPJ"
-                    className="erp-input"
-                    onChange={(e) =>
-                      setForm({ ...form, cnpj: e.target.value })
-                    }
-                  />
-
-                  <input
-                    placeholder="Inscrição Estadual"
-                    className="erp-input"
-                    onChange={(e) =>
-                      setForm({ ...form, ie: e.target.value })
-                    }
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <select
-                    className="erp-input"
-                    onChange={(e) =>
-                      setForm({ ...form, setor: e.target.value })
-                    }
-                  >
-                    <option>Selecione...</option>
-                    <option>Compras</option>
-                    <option>Financeiro</option>
-                    <option>Proprietário</option>
-                  </select>
-
-                  <div className="flex items-center gap-2">
-                    <span>Status</span>
-                    <input
-                      type="checkbox"
-                      checked={form.status}
-                      onChange={() =>
-                        setForm({ ...form, status: !form.status })
-                      }
-                    />
-                    <span className="text-green-500">Ativo</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* ENDEREÇO */}
-              <div>
-                <h3 className="font-semibold mb-3">Endereço</h3>
-
-                <div className="flex gap-2">
-                  <input
-                    placeholder="CEP"
-                    className="erp-input w-full"
-                    onChange={(e) =>
-                      setForm({ ...form, cep: e.target.value })
-                    }
-                  />
-
-                  <button
-                    onClick={buscarCEP}
-                    className="erp-button-primary"
-                  >
-                    Buscar CEP
-                  </button>
-                </div>
-
-                <input
-                  placeholder="Endereço"
-                  className="erp-input mt-2"
-                  value={form.endereco}
-                />
-
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <input
-                    placeholder="Número"
-                    className="erp-input"
-                    onChange={(e) =>
-                      setForm({ ...form, numero: e.target.value })
-                    }
-                  />
-
-                  <input
-                    placeholder="Bairro"
-                    className="erp-input"
-                    value={form.bairro}
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <input
-                    placeholder="Cidade"
-                    className="erp-input"
-                    value={form.cidade}
-                  />
-
-                  <input
-                    placeholder="Estado"
-                    className="erp-input"
-                    value={form.estado}
-                  />
-                </div>
-              </div>
-
-              {/* CONTATO COMERCIAL */}
-              <div>
-                <h3 className="font-semibold mb-3">Contato Comercial</h3>
-
-                <input
-                  placeholder="Nome"
-                  className="erp-input mb-2"
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      contato_comercial: e.target.value,
-                    })
-                  }
-                />
-
-                <input
-                  placeholder="Telefone"
-                  className="erp-input"
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      telefone_comercial: e.target.value,
-                    })
-                  }
-                />
-              </div>
-
-              {/* CONTATO FINANCEIRO */}
-              <div>
-                <h3 className="font-semibold mb-3">Contato Financeiro</h3>
-
-                <input
-                  placeholder="Nome"
-                  className="erp-input mb-2"
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      contato_financeiro: e.target.value,
-                    })
-                  }
-                />
-
-                <input
-                  placeholder="Telefone"
-                  className="erp-input"
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      telefone_financeiro: e.target.value,
-                    })
-                  }
-                />
-              </div>
-
-              {/* OBS */}
-              <div>
-                <h3 className="font-semibold mb-3">Observações</h3>
-
-                <textarea
-                  className="erp-input h-24"
-                  placeholder="Informações adicionais..."
-                  onChange={(e) =>
-                    setForm({ ...form, observacoes: e.target.value })
-                  }
-                />
-              </div>
-
-            </div>
-
-            {/* FOOTER */}
-            <div className="flex justify-between p-6 border-t">
-              <button
-                onClick={() => setOpen(false)}
-                className="erp-button-secondary"
-              >
-                Cancelar
-              </button>
-
-              <button
-                onClick={salvar}
-                className="erp-button-primary"
-              >
-                Cadastrar Cliente
-              </button>
-            </div>
+            <button
+              onClick={salvar}
+              className="erp-button-primary w-full"
+            >
+              {editing ? 'Atualizar' : 'Cadastrar'}
+            </button>
 
           </div>
         </div>
