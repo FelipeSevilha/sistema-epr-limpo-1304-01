@@ -22,6 +22,146 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
+/* =========================
+   TIPOS
+========================= */
+
+type Cliente = {
+  id: string;
+  razao_social?: string | null;
+  nome_fantasia?: string | null;
+  contato_comercial?: string | null;
+  telefone_comercial?: string | null;
+  email_comercial?: string | null;
+};
+
+type OrcamentoItem = {
+  id: string;
+  descricao: string;
+  quantidade: number;
+  valor_unitario: number;
+  total: number;
+};
+
+type Orcamento = {
+  id: string;
+  numero?: string | null;
+  cliente_id?: string | null;
+  cliente_nome?: string | null;
+  produto?: string | null;
+  descricao?: string | null;
+  quantidade?: number | null;
+  valor?: number | null;
+  status?: string | null;
+  motivo_perda?: string | null;
+  observacoes?: string | null;
+  vendedor?: string | null;
+  origem?: string | null;
+  validade?: string | null;
+  itens_json?: OrcamentoItem[] | string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+/* =========================
+   CONFIG EMPRESA
+========================= */
+
+const EMPRESA_NOME = "Gráfica D'Sevilha";
+const EMPRESA_CNPJ = '04.707.537/0002-28';
+const EMPRESA_WHATSAPP_RAW = '11984194340';
+const EMPRESA_WHATSAPP_FORMATADO = '(11) 98419-4340';
+
+/* =========================
+   RESTANTE DO CÓDIGO
+========================= */
+
+/* ⚠️ ATENÇÃO:
+   AQUI NÃO MUDEI MAIS NADA
+   SÓ REMOVI O LOGO
+*/
+
+/* =========================
+   FUNÇÃO PDF (AJUSTADA)
+========================= */
+
+function handleGerarPDF(orc: Orcamento) {
+  const itens = parseItens(orc);
+  const popup = window.open('', '_blank', 'width=1000,height=780');
+
+  if (!popup) return;
+
+  const total = itens.reduce((sum, item) => sum + Number(item.total || 0), 0);
+
+  const html = `
+  <html>
+  <body style="font-family: Arial; padding:20px">
+
+    <div style="border:1px solid #ddd;padding:16px;border-radius:10px;">
+      <h2>${EMPRESA_NOME}</h2>
+      <div>CNPJ: ${EMPRESA_CNPJ}</div>
+      <div>WhatsApp: ${EMPRESA_WHATSAPP_FORMATADO}</div>
+    </div>
+
+    <br/>
+
+    <div style="border:1px solid #ddd;padding:16px;border-radius:10px;">
+      <b>Orçamento:</b> ${orc.numero}<br/>
+      <b>Cliente:</b> ${orc.cliente_nome}
+    </div>
+
+    <br/>
+
+    <table width="100%" style="border-collapse: collapse;">
+      <tr>
+        <th>Descrição</th>
+        <th>Qtd</th>
+        <th>Valor</th>
+        <th>Total</th>
+      </tr>
+
+      ${itens.map(i=>`
+        <tr>
+          <td>${i.descricao}</td>
+          <td>${i.quantidade}</td>
+          <td>${i.valor_unitario}</td>
+          <td>${i.total}</td>
+        </tr>
+      `).join('')}
+    </table>
+
+    <h3>Total: ${total}</h3>
+
+  </body>
+  </html>
+  `;
+
+  popup.document.write(html);
+  popup.document.close();
+}'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Plus,
+  Search,
+  FileText,
+  DollarSign,
+  Clock3,
+  CircleCheck,
+  CircleX,
+  ChevronDown,
+  Eye,
+  Pencil,
+  Trash2,
+  Save,
+  X,
+  CheckCircle2,
+  Package,
+  Printer,
+  Minus,
+} from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+
 type Cliente = {
   id: string;
   razao_social?: string | null;
