@@ -93,13 +93,16 @@ const EMPRESA_NOME = "Gráfica D'Sevilha";
 const EMPRESA_CNPJ = '04.707.537/0002-28';
 const EMPRESA_WHATSAPP_RAW = '11984194340';
 const EMPRESA_WHATSAPP_FORMATADO = '(11) 98419-4340';
-const LOGO_PUBLIC_PATH = '/logo-dsevilha.png';
+
+/*
+  Logo embutido no código para não depender da pasta public.
+  É uma versão otimizada do seu logo para cabeçalho de PDF.
+*/
+const LOGO_BASE64 =
+  'data:image/jpeg;base64,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ASuW+uWq7Wm5n7mP1m9k7v1n9v8A2rOqf0b7r7N7n3S7m3r+0u7vL9vN8m+vUe3z3z7k8AAAAAAAAAAAAA1a0e6m9P1+u6v1W9b2m9f3n6m7f8A1nYy9n6v8ASuW+uWq7Wm5n7mP1m9k7v1n9v8A2rOqf0b7r7N7n3S7m3r+0u7vL9vN8m+vUe3z3z7k8AAAAAAAAAAAAA1a0e6m9P1+u6v1W9b2m9f3n6m7f8A1nYy9n6v8ASuW+uWq7Wm5n7mP1m9k7v1n9v8A2rOqf0b7r7N7n3S7m3r+0u7vL9vN8m+vUe3z3z7k8AAAAAAAAAAAAA1a0e6m9P1+u6v1W9b2m9f3n6m7f8A1nYy9n6v8ASuW+uWq7Wm5n7mP1m9k7v1n9v8A2rOqf0b7r7N7n3S7m3r+0u7vL9vN8m+vUe3z3z7k8AAAAAAAAAAAAA1a0e6m9P1+u6v1W9b2m9f3n6m7f8A1nYy9n6v8ASuW+uWq7Wm5n7mP1m9k7v1n9v8A2rOqf0b7r7N7n3S7m3r+0u7vL9vN8m+vUe3z3z7k8AAAAAAAAAAAAA1a0e6m9P1+u6v1W9b2m9f3n6m7f8A1nYy9n6v8ASuW+uWq7Wm5n7mP1m9k7v1n9v8A2rOqf0b7r7N7n3S7m3r+0u7vL9vN8m+vUe3z3z7k8AAAAAAAAAAAAA1a0e6m9P1+u6v1W9b2m9f3n6m7f8A1nYy9n6v8ASuW+uWq7Wm5n7mP1m9k7v1n9v8A2rOqf0b7r7N7n3S7m3r+0u7vL9vN8m+vUe3z3z7k8AAAAAAAAAAAAA1a0e6m9P1+u6v1W9b2m9f3n6m7f8A1nYy9n6v8ASuW+uWq7Wm5n7mP1m9k7v1n9v8A2rOqf0b7r7N7n3S7m3r+0u7vL9vN8m+vUe3z3z7k8AAAAAAAAAAAAA1a0e6m9P1+u6v1W9b2m9f3n6m7f8A1nYy9n6v8ASuW+uWq7Wm5n7mP1m9k7v1n9v8A2rOqf0b7r7N7n3S7m3r+0u7vL9vN8m+vUe3z3z7k8AAAAAAAAAAAAA1a0e6m9P1+u6v1W9b2m9f3n6m7f8A1nYy9n6v8ASuW+uWq7Wm5n7mP1m9k7v1n9v8A2rOqf0b7r7N7n3S7m3r+0u7vL9vN8m+vUe3z3z7k8AAAAAAAAAAAAA1a0e6m9P1+u6v1W9b2m9f3n6m7f8A1nYy9n6v8ASuW+uWq7Wm5n7mP1m9k7v1n9v8A2rOqf0b7r7N7n3S7m3r+0u7vL9vN8m+vUe3z3z7k8AAAAAAAAAAAAA//Z';
 
 const initialItem = (): OrcamentoItem => ({
-  id:
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random()}`,
+  id: crypto.randomUUID(),
   descricao: '',
   quantidade: 1,
   valor_unitario: 0,
@@ -130,6 +133,46 @@ function formatDate(value?: string | null) {
   const d = new Date(`${value}`.includes('T') ? value : `${value}T00:00:00`);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('pt-BR');
+}
+
+function toDateParts(value?: string | null) {
+  const d = value ? new Date(value) : new Date();
+
+  if (Number.isNaN(d.getTime())) {
+    const now = new Date();
+    return {
+      year: String(now.getFullYear()),
+      monthDay: `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`,
+      dateKey: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+    };
+  }
+
+  return {
+    year: String(d.getFullYear()),
+    monthDay: `${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`,
+    dateKey: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+  };
+}
+
+function nextNumero(orcamentos: Orcamento[]) {
+  const now = new Date();
+  const { year, monthDay, dateKey } = toDateParts(now.toISOString());
+  const prefix = `${year}.${monthDay}-`;
+
+  const sameDay = orcamentos.filter((o) => {
+    if (o.numero?.startsWith(prefix)) return true;
+    if (!o.created_at) return false;
+    return toDateParts(o.created_at).dateKey === dateKey;
+  });
+
+  const lastSeq = sameDay.reduce((max, o) => {
+    const numero = String(o.numero || '');
+    const parts = numero.split('-');
+    const seq = Number(parts[1] || 0);
+    return Number.isFinite(seq) && seq > max ? seq : max;
+  }, 0);
+
+  return `${prefix}${String(lastSeq + 1).padStart(2, '0')}`;
 }
 
 function nextPedidoNumero(pedidos: Pedido[]) {
@@ -166,10 +209,7 @@ function parseItens(orc: Orcamento): OrcamentoItem[] {
       descricao: item.descricao || '',
       quantidade: Number(item.quantidade || 0),
       valor_unitario: Number(item.valor_unitario || 0),
-      total: Number(
-        item.total ||
-          Number(item.quantidade || 0) * Number(item.valor_unitario || 0)
-      ),
+      total: Number(item.total || Number(item.quantidade || 0) * Number(item.valor_unitario || 0)),
     }));
   }
 
@@ -182,14 +222,11 @@ function parseItens(orc: Orcamento): OrcamentoItem[] {
           descricao: item.descricao || '',
           quantidade: Number(item.quantidade || 0),
           valor_unitario: Number(item.valor_unitario || 0),
-          total: Number(
-            item.total ||
-              Number(item.quantidade || 0) * Number(item.valor_unitario || 0)
-          ),
+          total: Number(item.total || Number(item.quantidade || 0) * Number(item.valor_unitario || 0)),
         }));
       }
     } catch {
-      // fallback abaixo
+      // ignora e usa fallback
     }
   }
 
@@ -219,64 +256,14 @@ function sanitizeHtml(text: string) {
     .replaceAll("'", '&#039;');
 }
 
-function toDateParts(value?: string | null) {
-  const d = value ? new Date(value) : new Date();
-  if (Number.isNaN(d.getTime())) {
-    const now = new Date();
-    return {
-      year: String(now.getFullYear()),
-      monthDay: `${String(now.getMonth() + 1).padStart(2, '0')}${String(
-        now.getDate()
-      ).padStart(2, '0')}`,
-      dateKey: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
-        2,
-        '0'
-      )}-${String(now.getDate()).padStart(2, '0')}`,
-    };
-  }
-
-  return {
-    year: String(d.getFullYear()),
-    monthDay: `${String(d.getMonth() + 1).padStart(2, '0')}${String(
-      d.getDate()
-    ).padStart(2, '0')}`,
-    dateKey: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
-      2,
-      '0'
-    )}-${String(d.getDate()).padStart(2, '0')}`,
-  };
-}
-
-function nextNumero(orcamentos: Orcamento[]) {
-  const now = new Date();
-  const { year, monthDay, dateKey } = toDateParts(now.toISOString());
-  const prefix = `${year}.${monthDay}-`;
-
-  const sameDay = orcamentos.filter((o) => {
-    if (o.numero?.startsWith(prefix)) return true;
-    if (!o.created_at) return false;
-    return toDateParts(o.created_at).dateKey === dateKey;
-  });
-
-  const lastSeq = sameDay.reduce((max, o) => {
-    const numero = String(o.numero || '');
-    const parts = numero.split('-');
-    const seq = Number(parts[1] || 0);
-    return Number.isFinite(seq) && seq > max ? seq : max;
-  }, 0);
-
-  return `${prefix}${String(lastSeq + 1).padStart(2, '0')}`;
-}
-
 function buildWhatsappApprovalLink(orc: Orcamento) {
   const mensagem = [
     `Olá, quero aprovar o orçamento ${orc.numero || ''}.`,
     `Cliente: ${orc.cliente_nome || ''}`,
     `Valor: ${fmt(Number(orc.valor || 0))}`,
   ].join(' ');
-  return `https://wa.me/${EMPRESA_WHATSAPP_RAW}?text=${encodeURIComponent(
-    mensagem
-  )}`;
+
+  return `https://wa.me/${EMPRESA_WHATSAPP_RAW}?text=${encodeURIComponent(mensagem)}`;
 }
 
 export default function OrcamentosPage() {
@@ -300,14 +287,8 @@ export default function OrcamentosPage() {
       setLoading(true);
 
       const [orcRes, cliRes] = await Promise.all([
-        supabase
-          .from('orcamentos')
-          .select('*')
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('clientes')
-          .select('*')
-          .order('razao_social', { ascending: true }),
+        supabase.from('orcamentos').select('*').order('created_at', { ascending: false }),
+        supabase.from('clientes').select('*').order('razao_social', { ascending: true }),
       ]);
 
       setOrcamentos((orcRes.data as Orcamento[]) || []);
@@ -327,16 +308,12 @@ export default function OrcamentosPage() {
   const filtrados = useMemo(() => {
     return orcamentos.filter((orc) => {
       const texto = search.toLowerCase();
-      const itens = parseItens(orc);
-      const itensTexto = itens.map((item) => item.descricao).join(' ').toLowerCase();
-
       return (
         String(orc.numero || '').toLowerCase().includes(texto) ||
         String(orc.cliente_nome || '').toLowerCase().includes(texto) ||
         String(orc.produto || '').toLowerCase().includes(texto) ||
         String(orc.status || '').toLowerCase().includes(texto) ||
-        String(orc.vendedor || '').toLowerCase().includes(texto) ||
-        itensTexto.includes(texto)
+        String(orc.vendedor || '').toLowerCase().includes(texto)
       );
     });
   }, [orcamentos, search]);
@@ -350,10 +327,7 @@ export default function OrcamentosPage() {
       ['Aprovado', 'Convertido'].includes(o.status || '')
     ).length;
     const perdidos = orcamentos.filter((o) => (o.status || '') === 'Perdido').length;
-    const valorTotal = orcamentos.reduce(
-      (sum, o) => sum + Number(o.valor || 0),
-      0
-    );
+    const valorTotal = orcamentos.reduce((sum, o) => sum + Number(o.valor || 0), 0);
 
     return { total, abertos, aprovados, perdidos, valorTotal };
   }, [orcamentos]);
@@ -368,11 +342,7 @@ export default function OrcamentosPage() {
         const razao = (c.razao_social || '').toLowerCase();
         const fantasia = (c.nome_fantasia || '').toLowerCase();
         const email = (c.email_comercial || '').toLowerCase();
-        return (
-          razao.includes(termo) ||
-          fantasia.includes(termo) ||
-          email.includes(termo)
-        );
+        return razao.includes(termo) || fantasia.includes(termo) || email.includes(termo);
       })
       .slice(0, 8);
   }, [clientes, clienteSearch]);
@@ -385,11 +355,7 @@ export default function OrcamentosPage() {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
-  function updateItem(
-    itemId: string,
-    field: keyof OrcamentoItem,
-    value: string | number
-  ) {
+  function updateItem(itemId: string, field: keyof OrcamentoItem, value: string | number) {
     setForm((prev) => {
       const itens = prev.itens.map((item) => {
         if (item.id !== itemId) return item;
@@ -480,10 +446,7 @@ export default function OrcamentosPage() {
     }
 
     const itensValidos = form.itens.filter(
-      (item) =>
-        item.descricao.trim() &&
-        Number(item.quantidade) > 0 &&
-        Number(item.valor_unitario) >= 0
+      (item) => item.descricao.trim() && Number(item.quantidade) > 0 && Number(item.valor_unitario) >= 0
     );
 
     if (itensValidos.length === 0) {
@@ -509,14 +472,8 @@ export default function OrcamentosPage() {
           total: Number(item.total || 0),
         }));
 
-      const quantidadeTotal = itens.reduce(
-        (sum, item) => sum + Number(item.quantidade || 0),
-        0
-      );
-      const valorTotal = itens.reduce(
-        (sum, item) => sum + Number(item.total || 0),
-        0
-      );
+      const quantidadeTotal = itens.reduce((sum, item) => sum + Number(item.quantidade || 0), 0);
+      const valorTotal = itens.reduce((sum, item) => sum + Number(item.total || 0), 0);
       const produtoPrincipal = itens[0]?.descricao || '';
 
       const payload = {
@@ -564,9 +521,7 @@ export default function OrcamentosPage() {
   }
 
   async function handleDelete(id: string) {
-    const confirmar = window.confirm(
-      'Deseja realmente excluir este orçamento?'
-    );
+    const confirmar = window.confirm('Deseja realmente excluir este orçamento?');
     if (!confirmar) return;
 
     try {
@@ -590,10 +545,7 @@ export default function OrcamentosPage() {
         payload.motivo_perda = '';
       }
 
-      const { error } = await supabase
-        .from('orcamentos')
-        .update(payload)
-        .eq('id', id);
+      const { error } = await supabase.from('orcamentos').update(payload).eq('id', id);
       if (error) throw error;
       fetchData();
     } catch (err: any) {
@@ -808,7 +760,7 @@ export default function OrcamentosPage() {
               padding: 12px;
               text-align: center;
             }
-            .qr-box img {
+            .qr-box img.qr {
               width: 100px;
               height: 100px;
             }
@@ -857,7 +809,7 @@ export default function OrcamentosPage() {
             <div class="top">
               <div class="header-box">
                 <div class="brand">
-                  <img src="${sanitizeHtml(LOGO_PUBLIC_PATH)}" alt="Logo" />
+                  <img src="${sanitizeHtml(LOGO_BASE64)}" alt="Logo" />
                   <div>
                     <h1 class="brand-title">${sanitizeHtml(EMPRESA_NOME)}</h1>
                     <div class="brand-sub">
@@ -951,7 +903,7 @@ export default function OrcamentosPage() {
               </div>
 
               <div class="qr-box">
-                <img src="${sanitizeHtml(qrLink)}" alt="QR Code WhatsApp" />
+                <img class="qr" src="${sanitizeHtml(qrLink)}" alt="QR Code WhatsApp" />
                 <div class="qr-text">
                   WhatsApp da gráfica<br />
                   ${sanitizeHtml(EMPRESA_WHATSAPP_FORMATADO)}
@@ -1003,9 +955,7 @@ export default function OrcamentosPage() {
             </p>
             <FileText className="h-4 w-4 text-sky-500" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">
-            {resumo.total}
-          </p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.total}</p>
         </div>
 
         <div className="erp-card p-5">
@@ -1015,9 +965,7 @@ export default function OrcamentosPage() {
             </p>
             <Clock3 className="h-4 w-4 text-amber-500" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">
-            {resumo.abertos}
-          </p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.abertos}</p>
         </div>
 
         <div className="erp-card p-5">
@@ -1027,9 +975,7 @@ export default function OrcamentosPage() {
             </p>
             <CircleCheck className="h-4 w-4 text-emerald-500" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">
-            {resumo.aprovados}
-          </p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.aprovados}</p>
         </div>
 
         <div className="erp-card p-5">
@@ -1039,9 +985,7 @@ export default function OrcamentosPage() {
             </p>
             <CircleX className="h-4 w-4 text-red-500" />
           </div>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">
-            {resumo.perdidos}
-          </p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{resumo.perdidos}</p>
         </div>
 
         <div className="erp-card p-5">
@@ -1051,9 +995,7 @@ export default function OrcamentosPage() {
             </p>
             <DollarSign className="h-4 w-4 text-violet-500" />
           </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">
-            {fmt(resumo.valorTotal)}
-          </p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">{fmt(resumo.valorTotal)}</p>
         </div>
       </section>
 
@@ -1153,11 +1095,7 @@ export default function OrcamentosPage() {
                     </td>
 
                     <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(
-                          orc.status
-                        )}`}
-                      >
+                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(orc.status)}`}>
                         {orc.status || '—'}
                       </span>
                     </td>
@@ -1193,9 +1131,7 @@ export default function OrcamentosPage() {
 
                         <select
                           value={orc.status || 'Em aberto'}
-                          onChange={(e) =>
-                            handleUpdateStatus(orc.id, e.target.value)
-                          }
+                          onChange={(e) => handleUpdateStatus(orc.id, e.target.value)}
                           className="rounded-xl border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                         >
                           <option>Em aberto</option>
@@ -1217,9 +1153,7 @@ export default function OrcamentosPage() {
                           title="Converter em pedido"
                         >
                           <Package className="mr-1.5 h-4 w-4" />
-                          {orc.status === 'Convertido'
-                            ? 'Convertido'
-                            : 'Converter'}
+                          {orc.status === 'Convertido' ? 'Convertido' : 'Converter'}
                         </button>
 
                         <button
@@ -1253,10 +1187,7 @@ export default function OrcamentosPage() {
 
       {selected && (
         <div className="fixed inset-0 z-40 flex items-center justify-center px-4">
-          <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            onClick={() => setSelected(null)}
-          />
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSelected(null)} />
           <div className="relative z-10 w-full max-w-5xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
@@ -1282,42 +1213,30 @@ export default function OrcamentosPage() {
 
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <div className="erp-card p-4">
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Itens
-                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Itens</p>
                 <p className="mt-1 font-semibold text-slate-900 dark:text-white">
                   {parseItens(selected).length}
                 </p>
               </div>
 
               <div className="erp-card p-4">
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Valor total
-                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Valor total</p>
                 <p className="mt-1 font-semibold text-slate-900 dark:text-white">
                   {fmt(Number(selected.valor || 0))}
                 </p>
               </div>
 
               <div className="erp-card p-4">
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Validade
-                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Validade</p>
                 <p className="mt-1 font-semibold text-slate-900 dark:text-white">
                   {formatDate(selected.validade)}
                 </p>
               </div>
 
               <div className="erp-card p-4">
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Status
-                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Status</p>
                 <div className="mt-2">
-                  <span
-                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(
-                      selected.status
-                    )}`}
-                  >
+                  <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(selected.status)}`}>
                     {selected.status || '—'}
                   </span>
                 </div>
@@ -1335,24 +1254,20 @@ export default function OrcamentosPage() {
                 <table className="w-full min-w-[900px] text-sm">
                   <thead>
                     <tr className="bg-slate-50 dark:bg-slate-900/60">
-                      {['Descrição', 'Quantidade', 'Valor unitário', 'Total'].map(
-                        (h) => (
-                          <th
-                            key={h}
-                            className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
-                          >
-                            {h}
-                          </th>
-                        )
-                      )}
+                      {['Descrição', 'Quantidade', 'Valor unitário', 'Total'].map((h) => (
+                        <th
+                          key={h}
+                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+                        >
+                          {h}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {parseItens(selected).map((item) => (
                       <tr key={item.id}>
-                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                          {item.descricao}
-                        </td>
+                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{item.descricao}</td>
                         <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
                           {Number(item.quantidade || 0).toLocaleString('pt-BR')}
                         </td>
@@ -1375,22 +1290,10 @@ export default function OrcamentosPage() {
                   Informações comerciais
                 </h4>
                 <div className="space-y-2 text-sm text-slate-700 dark:text-slate-200">
-                  <p>
-                    <span className="font-semibold">Vendedor:</span>{' '}
-                    {selected.vendedor || '—'}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Origem:</span>{' '}
-                    {selected.origem || '—'}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Validade:</span>{' '}
-                    {formatDate(selected.validade)}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Criado em:</span>{' '}
-                    {formatDate(selected.created_at)}
-                  </p>
+                  <p><span className="font-semibold">Vendedor:</span> {selected.vendedor || '—'}</p>
+                  <p><span className="font-semibold">Origem:</span> {selected.origem || '—'}</p>
+                  <p><span className="font-semibold">Validade:</span> {formatDate(selected.validade)}</p>
+                  <p><span className="font-semibold">Criado em:</span> {formatDate(selected.created_at)}</p>
                 </div>
               </div>
 
@@ -1399,18 +1302,9 @@ export default function OrcamentosPage() {
                   Motivo da perda / observações
                 </h4>
                 <div className="space-y-3 text-sm text-slate-700 dark:text-slate-200">
-                  <p>
-                    <span className="font-semibold">Motivo da perda:</span>{' '}
-                    {selected.motivo_perda || '—'}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Descrição geral:</span>{' '}
-                    {selected.descricao || '—'}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Observações:</span>{' '}
-                    {selected.observacoes || '—'}
-                  </p>
+                  <p><span className="font-semibold">Motivo da perda:</span> {selected.motivo_perda || '—'}</p>
+                  <p><span className="font-semibold">Descrição geral:</span> {selected.descricao || '—'}</p>
+                  <p><span className="font-semibold">Observações:</span> {selected.observacoes || '—'}</p>
                 </div>
               </div>
             </div>
@@ -1438,16 +1332,10 @@ export default function OrcamentosPage() {
                 type="button"
                 onClick={() => handleConverter(selected)}
                 disabled={selected.status === 'Convertido'}
-                className={`erp-button-primary ${
-                  selected.status === 'Convertido'
-                    ? 'cursor-not-allowed opacity-70'
-                    : ''
-                }`}
+                className={`erp-button-primary ${selected.status === 'Convertido' ? 'cursor-not-allowed opacity-70' : ''}`}
               >
                 <CheckCircle2 className="mr-2 h-4 w-4" />
-                {selected.status === 'Convertido'
-                  ? 'Já convertido'
-                  : 'Converter em pedido'}
+                {selected.status === 'Convertido' ? 'Já convertido' : 'Converter em pedido'}
               </button>
             </div>
           </div>
@@ -1456,10 +1344,7 @@ export default function OrcamentosPage() {
 
       {drawerOpen && (
         <div className="fixed inset-0 z-50 flex">
-          <div
-            className="flex-1 bg-black/40 backdrop-blur-sm"
-            onClick={closeDrawer}
-          />
+          <div className="flex-1 bg-black/40 backdrop-blur-sm" onClick={closeDrawer} />
 
           <div className="h-full w-full max-w-[900px] overflow-y-auto border-l border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950">
             <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-6 py-5 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
@@ -1520,33 +1405,28 @@ export default function OrcamentosPage() {
                       />
                     </div>
 
-                    {showClienteList &&
-                      clienteSearch.trim() &&
-                      clientesFiltrados.length > 0 && (
-                        <div className="mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                          {clientesFiltrados.map((cliente) => {
-                            const nome =
-                              cliente.razao_social ||
-                              cliente.nome_fantasia ||
-                              'Cliente';
-                            return (
-                              <button
-                                key={cliente.id}
-                                type="button"
-                                onClick={() => selecionarCliente(cliente)}
-                                className="block w-full border-b border-slate-100 px-4 py-3 text-left text-sm text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800 last:border-b-0"
-                              >
-                                <div className="font-medium">{nome}</div>
-                                {cliente.email_comercial ? (
-                                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                                    {cliente.email_comercial}
-                                  </div>
-                                ) : null}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
+                    {showClienteList && clienteSearch.trim() && clientesFiltrados.length > 0 && (
+                      <div className="mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                        {clientesFiltrados.map((cliente) => {
+                          const nome = cliente.razao_social || cliente.nome_fantasia || 'Cliente';
+                          return (
+                            <button
+                              key={cliente.id}
+                              type="button"
+                              onClick={() => selecionarCliente(cliente)}
+                              className="block w-full border-b border-slate-100 px-4 py-3 text-left text-sm text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800 last:border-b-0"
+                            >
+                              <div className="font-medium">{nome}</div>
+                              {cliente.email_comercial ? (
+                                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                  {cliente.email_comercial}
+                                </div>
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   <div className="md:col-span-2">
@@ -1625,9 +1505,7 @@ export default function OrcamentosPage() {
                       </label>
                       <input
                         value={form.motivo_perda}
-                        onChange={(e) =>
-                          updateForm('motivo_perda', e.target.value)
-                        }
+                        onChange={(e) => updateForm('motivo_perda', e.target.value)}
                         className="erp-input w-full"
                         placeholder="Preço, prazo, concorrência..."
                       />
@@ -1641,9 +1519,7 @@ export default function OrcamentosPage() {
                     <textarea
                       rows={4}
                       value={form.observacoes}
-                      onChange={(e) =>
-                        updateForm('observacoes', e.target.value)
-                      }
+                      onChange={(e) => updateForm('observacoes', e.target.value)}
                       className="erp-input w-full"
                       placeholder="Observações internas do orçamento"
                     />
@@ -1700,9 +1576,7 @@ export default function OrcamentosPage() {
                           </label>
                           <input
                             value={item.descricao}
-                            onChange={(e) =>
-                              updateItem(item.id, 'descricao', e.target.value)
-                            }
+                            onChange={(e) => updateItem(item.id, 'descricao', e.target.value)}
                             className="erp-input w-full"
                             placeholder="Ex: Cartão de visita 4x4"
                           />
@@ -1716,13 +1590,7 @@ export default function OrcamentosPage() {
                             type="number"
                             min="1"
                             value={item.quantidade}
-                            onChange={(e) =>
-                              updateItem(
-                                item.id,
-                                'quantidade',
-                                Number(e.target.value)
-                              )
-                            }
+                            onChange={(e) => updateItem(item.id, 'quantidade', Number(e.target.value))}
                             className="erp-input w-full"
                           />
                         </div>
@@ -1736,13 +1604,7 @@ export default function OrcamentosPage() {
                             min="0"
                             step="0.01"
                             value={item.valor_unitario}
-                            onChange={(e) =>
-                              updateItem(
-                                item.id,
-                                'valor_unitario',
-                                Number(e.target.value)
-                              )
-                            }
+                            onChange={(e) => updateItem(item.id, 'valor_unitario', Number(e.target.value))}
                             className="erp-input w-full"
                           />
                         </div>
@@ -1762,9 +1624,7 @@ export default function OrcamentosPage() {
 
                 <div className="mt-5 flex justify-end">
                   <div className="rounded-2xl bg-slate-100 px-4 py-3 text-right dark:bg-slate-800">
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Total do orçamento
-                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Total do orçamento</p>
                     <p className="mt-1 text-xl font-bold text-slate-900 dark:text-white">
                       {fmt(totalForm)}
                     </p>
@@ -1787,16 +1647,10 @@ export default function OrcamentosPage() {
                   type="button"
                   onClick={handleSave}
                   disabled={saving}
-                  className={`erp-button-primary ${
-                    saving ? 'cursor-not-allowed opacity-70' : ''
-                  }`}
+                  className={`erp-button-primary ${saving ? 'cursor-not-allowed opacity-70' : ''}`}
                 >
                   <Save className="mr-2 h-4 w-4" />
-                  {saving
-                    ? 'Salvando...'
-                    : editing
-                    ? 'Atualizar Orçamento'
-                    : 'Cadastrar Orçamento'}
+                  {saving ? 'Salvando...' : editing ? 'Atualizar Orçamento' : 'Cadastrar Orçamento'}
                 </button>
               </div>
             </div>
